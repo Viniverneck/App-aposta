@@ -361,6 +361,14 @@ def processar_value_bets(
         tipo = _resolver_tipo(market_name, bet_side, linha, None)
         prob_impl = round((1 / odd) * 100, 2) if odd > 0 else 50.0
 
+        # Value bets: URL base da casa (sem deep link de mercado específico)
+        URL_BASE_CASAS = {
+            "Bet365":  "https://www.bet365.com",
+            "Betano":  "https://www.betano.com.br",
+            "Pinnacle":"https://www.pinnacle.com",
+        }
+        link_vb = URL_BASE_CASAS.get(bookmaker, "")
+
         chave = f"{home} x {away} | {tipo} | {bookmaker} | vb"
         resultado[chave] = {
             "jogo": f"{home} x {away}",
@@ -376,6 +384,7 @@ def processar_value_bets(
             "score": round((prob_impl / 100) * odd, 2),
             "fonte": "value_bet_api",
             "drop_sinal": False,
+            "link": link_vb,
         }
 
     logger.info("processar_value_bets: %d oportunidades", len(resultado))
@@ -618,6 +627,8 @@ def rodar_sistema(
         event_id: int = jogo.get("id", 0)
         liga: str = jogo.get("league", {}).get("name", "")
         horario: str = _fmt_horario(jogo.get("date", ""))
+        # Links diretos por casa: {"Bet365": "https://...", "Betano": "https://..."}
+        urls_jogo: dict = jogo.get("urls", {})
 
         # Poisson com médias reais de gols via stats históricas.
         # stats_ligas é injetado pelo motor após buscar_stats_ligas() (cache 24h).
@@ -671,6 +682,10 @@ def rodar_sistema(
                     aceitos += 1
                     drop_sinal = bool(drop_info and drop_info.get("bet_side") == lado)
 
+                    # Link direto: tenta a casa exata, fallback para Bet365
+                    casa_base = casa.split(" ")[0]  # "Bet365 (no latency)" → "Bet365"
+                    link = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
+
                     chave = f"{home} x {away} | {tipo} | {casa}"
                     resultados_poisson[chave] = {
                         "jogo": f"{home} x {away}",
@@ -686,6 +701,7 @@ def rodar_sistema(
                         "score": round(prob * odd, 2),
                         "fonte": "poisson",
                         "drop_sinal": drop_sinal,
+                        "link": link,
                     }
 
         logger.debug("%s x %s | aceitos=%d sem_odds=%d fmt=%d faixa=%d ev=%d",
