@@ -1,0 +1,21 @@
+# Variáveis de ambiente — NUNCA suba isso pro GitHub
+.env
+.streamlit/secrets.toml
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
