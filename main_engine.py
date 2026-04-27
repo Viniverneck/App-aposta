@@ -37,10 +37,12 @@ MAX_EVENTOS: int = 30
 LOTE_ODDS: int = 10
 EV_MINIMO: float = -0.20
 KELLY_MAX: float = 0.05
-JANELA_HORAS: int = 24
+JANELA_HORAS_FUTEBOL: int = 24
+JANELA_HORAS_NBA:     int = 48  # NBA joga à noite no fuso BR
 FUSO_BRASIL = timezone(timedelta(hours=-3))
 
 LIGAS_PERMITIDAS: set[str] = {
+    # Futebol
     "spain-la-liga",
     "italy-serie-a",
     "england-premier-league",
@@ -49,6 +51,21 @@ LIGAS_PERMITIDAS: set[str] = {
     "uefa-champions-league",
     "brazil-serie-a",
     "brazil-copa-do-brasil",
+    # Basquete
+    "usa-nba",
+}
+
+# Esportes mapeados por liga — usado para buscar eventos do esporte correto
+LIGA_ESPORTE: dict[str, str] = {
+    "spain-la-liga":          "football",
+    "italy-serie-a":          "football",
+    "england-premier-league": "football",
+    "germany-bundesliga":     "football",
+    "france-ligue-1":         "football",
+    "uefa-champions-league":  "football",
+    "brazil-serie-a":         "football",
+    "brazil-copa-do-brasil":  "football",
+    "usa-nba":                "basketball",
 }
 
 
@@ -108,16 +125,62 @@ def score_evento(evento: dict) -> float:
 # Helpers de mercado
 # ---------------------------------------------------------------------------
 
+# Mercados NBA que usam linha (spread/total) — exibem o valor da linha
+_MERCADOS_COM_LINHA_NBA: set[str] = {
+    "Spread", "Totals", "Spread HT", "Totals HT", "Totals 1Q", "Spread Q1",
+    "Team Total Home", "Team Total Away", "Alternative Totals", "Alternative Spread",
+    "Points O/U", "Rebounds O/U", "Assists O/U", "Steals O/U", "Blocks O/U",
+    "Field Goals Made O/U", "Threes Made O/U",
+    "Points & Rebounds O/U", "Points & Assists O/U",
+    "Assists & Rebounds O/U", "Points, Assists & Rebounds O/U",
+    "Steals & Blocks O/U",
+}
+
+# Mercados NBA sem linha — exibem só o lado (sim/não, ocorre/não ocorre)
+_MERCADOS_SIM_NAO_NBA: set[str] = {
+    "Double Double", "Triple Double",
+    "Player First Basket", "Player First Assist", "Player First Rebound",
+}
+
+# Mercados de milestones — jogador atinge X pontos/rebotes/assistências
+_MERCADOS_MILESTONE_NBA: set[str] = {
+    "Player Points Milestones", "Player Rebounds Milestones",
+    "Player Assists Milestones", "Player Threes Milestones",
+}
+
+
 def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -> str:
-    """Converte market + lado em descrição legível."""
-    if market_name == "ML":
+    """Converte market + lado em descrição legível para futebol e NBA."""
+
+    # ── Futebol ──────────────────────────────────────────────────────────────
+    if market_name == "ML" and linha is None:
         return f"Vitoria {lado}"
     if label:
         return label
-    if market_name in {"Totals", "Over/Under"}:
-        return f"{lado.upper()} {linha} gols" if linha else f"{lado.upper()} gols"
+    if market_name in {"Totals", "Over/Under"} and linha is not None:
+        return f"{lado.upper()} {linha} gols"
     if "Corner" in market_name:
         return f"{lado.upper()} {linha} escanteios" if linha else f"{lado.upper()} escanteios"
+
+    # ── NBA — mercados com linha numérica ─────────────────────────────────
+    if market_name in _MERCADOS_COM_LINHA_NBA:
+        sufixo = f" {linha}" if linha is not None else ""
+        return f"{market_name} {lado.upper()}{sufixo}"
+
+    # ── NBA — sim/não (Double Double, Player First Basket etc.) ──────────
+    if market_name in _MERCADOS_SIM_NAO_NBA:
+        return f"{market_name} — {lado}"
+
+    # ── NBA — milestones de jogador ───────────────────────────────────────
+    if market_name in _MERCADOS_MILESTONE_NBA:
+        sufixo = f" {linha}" if linha is not None else ""
+        return f"{market_name}{sufixo} — {lado}"
+
+    # ── NBA — ML por período (HT, Q1) ─────────────────────────────────────
+    if market_name in {"ML HT", "ML Q1"}:
+        return f"{market_name} Vitoria {lado}"
+
+    # ── Fallback genérico ─────────────────────────────────────────────────
     return f"{market_name} {lado}"
 
 
@@ -156,17 +219,49 @@ def _prob_para_lado(market_name: str, lado: str, probs: dict) -> float:
 # ---------------------------------------------------------------------------
 
 def get_events() -> list[dict]:
-    """Retorna eventos de futebol pendentes."""
-    url = f"{BASE_URL}/events?apiKey={API_KEY}&sport=football&status=pending"
+    """
+    Retorna eventos pendentes de futebol e basquete combinados.
+    Faz 2 chamadas (1 por esporte) e une os resultados.
+    """
+    todos: list[dict] = []
+    for esporte in ("football", "basketball"):
+        url = f"{BASE_URL}/events?apiKey={API_KEY}&sport={esporte}&status=pending"
+        try:
+            data = _get_json(url)
+            if isinstance(data, list):
+                todos.extend(data)
+                logger.info("get_events (%s): %d eventos", esporte, len(data))
+            else:
+                logger.warning("get_events (%s): resposta inesperada", esporte)
+        except requests.RequestException as exc:
+            logger.error("get_events (%s) falhou: %s", esporte, exc)
+    logger.info("get_events total: %d eventos", len(todos))
+    return todos
+
+
+# ---------------------------------------------------------------------------
+# Utilitário — listar ligas de basquete disponíveis na API
+# ---------------------------------------------------------------------------
+
+def listar_ligas_basquete() -> list[dict]:
+    """
+    Lista todas as ligas de basquete disponíveis na API.
+    Use uma vez para confirmar o slug correto da NBA:
+
+        from main_engine import listar_ligas_basquete
+        for l in listar_ligas_basquete():
+            print(l["slug"], "|", l["name"])
+    """
+    url = f"{BASE_URL}/leagues?apiKey={API_KEY}&sport=basketball"
     try:
         data = _get_json(url)
         if not isinstance(data, list):
-            logger.warning("get_events: resposta inesperada — %s", type(data))
+            logger.warning("listar_ligas_basquete: resposta inesperada")
             return []
-        logger.info("get_events: %d eventos recebidos", len(data))
-        return data
+        logger.info("listar_ligas_basquete: %d ligas", len(data))
+        return sorted(data, key=lambda x: x.get("eventsCount", 0), reverse=True)
     except requests.RequestException as exc:
-        logger.error("get_events falhou: %s", exc)
+        logger.error("listar_ligas_basquete falhou: %s", exc)
         return []
 
 
@@ -315,15 +410,24 @@ def get_arbitrage(limit: int = 50) -> list[dict]:
         return []
 
 
-def processar_arbitrage(raw: list[dict]) -> list[dict]:
+def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
     """
     Converte payload /arbitrage-bets em lista estruturada.
+    esporte: "futebol" | "nba" | "todos"
     profitMargin = lucro garantido em % (ex: 2.3 = R$2.30 por R$100 apostados).
     """
+    SLUGS_NBA = {"usa-nba"}
+    SLUGS_FUT = {s for s, e in LIGA_ESPORTE.items() if e == "football"}
+
     resultado = []
     for arb in raw:
-        event = arb.get("event", {})
+        event  = arb.get("event", {})
         market = arb.get("market", {})
+        slug   = event.get("leagueSlug") or event.get("league_slug", "")
+
+        if esporte == "nba"     and slug not in SLUGS_NBA: continue
+        if esporte == "futebol" and slug not in SLUGS_FUT: continue
+
         resultado.append({
             "id": arb.get("id", ""),
             "jogo": f"{event.get('home', '?')} x {event.get('away', '?')}",
@@ -387,7 +491,11 @@ def get_dropping_odds(
         logger.info("get_dropping_odds: %d eventos com queda >= %.0f%%", len(index), min_drop_pct)
         return index
     except requests.RequestException as exc:
-        logger.error("get_dropping_odds falhou: %s", exc)
+        # 403 = endpoint não incluído no plano — silencioso
+        if "403" in str(exc):
+            logger.debug("get_dropping_odds: não disponível no plano atual (403)")
+        else:
+            logger.error("get_dropping_odds falhou: %s", exc)
         return {}
 
 
@@ -400,20 +508,18 @@ def rodar_sistema(
     odd_max: float,
     mercados_permitidos: set[str] | None = None,
     stats_ligas: dict | None = None,
+    modo: str = "todos",
 ) -> list[dict]:
     """
-    Pipeline completo:
-      A. Value bets da API  (EV confiavel, fonte primaria)
-      B. Odds multi + Poisson com stats reais (complemento)
-      C. Dropping odds       (sinal de sharp money)
-      D. Unifica, deduplica e ordena por EV
-
-    stats_ligas: médias de gols por time — injetado pelo app (cache 24h).
-                 Se None, busca internamente (sem cache).
+    Pipeline completo.
+    modo: "futebol" | "nba" | "todos"
+    stats_ligas: médias de gols — injetado pelo app (cache 24h).
     """
-    logger.info("=== SISTEMA INICIADO ===")
+    logger.info("=== SISTEMA INICIADO [modo=%s] ===", modo)
     if mercados_permitidos:
         logger.info("Mercados filtrados: %s", sorted(mercados_permitidos))
+
+    janela_horas = JANELA_HORAS_NBA if modo == "nba" else JANELA_HORAS_FUTEBOL
 
     # Stats históricas para o Poisson (injetadas pelo app com cache 24h)
     if stats_ligas is None:
@@ -421,14 +527,24 @@ def rodar_sistema(
         stats_ligas = buscar_stats_ligas()
     logger.info("Stats disponíveis para %d times", len(stats_ligas))
 
-    # A. Value bets
+    # A. Value bets (filtradas por modo após processar)
     vb_raw = get_value_bets("Bet365")
-    oportunidades_vb = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos)
+    oportunidades_vb_todos = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos)
+
+    LIGAS_NBA_NOMES = {"USA - NBA", "NBA"}
+    LIGAS_FUT_NOMES = {l for l, e in LIGA_ESPORTE.items() if e == "football"}
+
+    if modo == "nba":
+        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") in LIGAS_NBA_NOMES]
+    elif modo == "futebol":
+        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") not in LIGAS_NBA_NOMES]
+    else:
+        oportunidades_vb = oportunidades_vb_todos
 
     # B. Odds multi + Poisson
     eventos = get_events()
     agora = datetime.now(timezone.utc)
-    janela_fim = agora + timedelta(hours=JANELA_HORAS)
+    janela_fim = agora + timedelta(hours=janela_horas)
 
     eventos_filtrados = []
     for e in eventos:
@@ -439,7 +555,7 @@ def rodar_sistema(
         except Exception as exc:
             logger.debug("Evento ignorado: %s", exc)
 
-    logger.info("Eventos nas proximas %dh: %d", JANELA_HORAS, len(eventos_filtrados))
+    logger.info("Eventos nas proximas %dh: %d", janela_horas, len(eventos_filtrados))
 
     eventos_ligas = [
         e for e in eventos_filtrados
@@ -447,15 +563,47 @@ def rodar_sistema(
     ]
     logger.info("Eventos em ligas fortes: %d", len(eventos_ligas))
 
-    base = eventos_ligas if len(eventos_ligas) >= 10 else eventos_filtrados
-    eventos_ord = sorted(base, key=score_evento, reverse=True)[:MAX_EVENTOS]
+    # Filtrar por modo: só futebol, só NBA ou ambos
+    if modo == "futebol":
+        eventos_ord = sorted(
+            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "football"],
+            key=score_evento, reverse=True,
+        )[:MAX_EVENTOS]
+    elif modo == "nba":
+        eventos_ord = sorted(
+            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "basketball"],
+            key=score_evento, reverse=True,
+        )[:MAX_EVENTOS]
+        if not eventos_ord:
+            # Fallback: todos os eventos de basquete nas próximas 48h
+            eventos_ord = sorted(
+                [e for e in eventos_filtrados if e.get("sport","").lower() in ("basketball","basquete")],
+                key=score_evento, reverse=True,
+            )[:MAX_EVENTOS]
+    else:
+        # Modo todos: cota dividida
+        ev_fut = sorted(
+            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "football"],
+            key=score_evento, reverse=True,
+        )[:MAX_EVENTOS - 10]
+        ev_bsk = sorted(
+            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "basketball"],
+            key=score_evento, reverse=True,
+        )[:10]
+        eventos_ord = ev_fut + ev_bsk or sorted(eventos_filtrados, key=score_evento, reverse=True)[:MAX_EVENTOS]
+
+    logger.info("Eventos selecionados [modo=%s]: %d", modo, len(eventos_ord))
+
     event_ids = [e["id"] for e in eventos_ord]
     logger.info("IDs enviados para odds: %d", len(event_ids))
 
     odds_lista = get_odds_multi(event_ids)
 
-    # C. Dropping odds
-    dropping_index = get_dropping_odds(min_drop_pct=5.0)
+    # C. Dropping odds — futebol e basquete combinados
+    drop_fut  = get_dropping_odds(sport="football",   min_drop_pct=5.0)
+    drop_bask = get_dropping_odds(sport="basketball", min_drop_pct=5.0)
+    dropping_index = {**drop_fut, **drop_bask}
+    logger.info("Dropping odds: %d futebol + %d basquete", len(drop_fut), len(drop_bask))
 
     # D. Processar odds multi
     resultados_poisson: dict[str, dict] = {}
