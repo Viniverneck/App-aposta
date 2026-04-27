@@ -172,6 +172,29 @@ def _calcular_stakes_por_meta(legs, banca_total, lucro_desejado):
 # Componentes reutilizáveis
 # ---------------------------------------------------------------------------
 
+def _exibir_links_picks(df: pd.DataFrame, key: str) -> None:
+    """
+    Exibe links clicáveis abaixo da tabela de picks.
+    Picks com link direto (Poisson) abrem o evento exato na casa.
+    Picks de value_bet_api abrem a home page da casa.
+    """
+    df_com_link = df[df["link"].notna() & (df["link"] != "")] if "link" in df.columns else pd.DataFrame()
+    if df_com_link.empty:
+        return
+
+    with st.expander(f"🔗 Links de aposta ({len(df_com_link)} picks)", expanded=False):
+        for _, row in df_com_link.iterrows():
+            link  = row.get("link", "")
+            jogo  = row.get("jogo", "")
+            tipo  = row.get("tipo", "")
+            odd   = row.get("odd", "")
+            casa  = row.get("casa", "").split(" ")[0]  # remove sufixos como "(no latency)"
+            fonte = row.get("fonte", "")
+            icone = "🎯" if fonte == "value_bet_api" else "📌"
+            label = f"{icone} **{jogo}** — {tipo} @ {odd:.2f} _{casa}_"
+            st.markdown(f"{label} → [Abrir na {casa}]({link})")
+
+
 def _tabela_ev_futebol(df: pd.DataFrame, key: str) -> None:
     RENAME = {
         "jogo":"Jogo","liga":"Liga","horario":"Horário","tipo":"Tipo",
@@ -185,6 +208,8 @@ def _tabela_ev_futebol(df: pd.DataFrame, key: str) -> None:
         .format({"Odd":"{:.2f}","Prob.(%)":"{:.1f}%","EV":"{:+.3f}","Score":"{:.2f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
+    # Links abaixo da tabela
+    _exibir_links_picks(df, key)
 
 
 def _tabela_ev_nba(df: pd.DataFrame, key: str) -> None:
@@ -201,6 +226,8 @@ def _tabela_ev_nba(df: pd.DataFrame, key: str) -> None:
         .format({"Odd":"{:.2f}","Prob.(%)":"{:.1f}%","EV":"{:+.3f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
+    # Links abaixo da tabela
+    _exibir_links_picks(df, key)
 
 
 def _exibir_multipla(resultados: list[dict], banca: float, key_prefix: str) -> None:
@@ -216,7 +243,10 @@ def _exibir_multipla(resultados: list[dict], banca: float, key_prefix: str) -> N
     c4.metric("Stake sugerida",  f"R$ {multi['stake']:.2f}")
     st.markdown("**Picks (jogos distintos):**")
     for i, p in enumerate(multi["picks"], 1):
-        st.markdown(f"{i}. **{p['jogo']}** — {p['tipo']} @ {p['odd']:.2f} _(EV: {p['ev']:+.3f})_")
+        link  = p.get("link", "")
+        casa  = p.get("casa", "").split(" ")[0]
+        link_md = f" → [Apostar na {casa}]({link})" if link else ""
+        st.markdown(f"{i}. **{p['jogo']}** — {p['tipo']} @ {p['odd']:.2f} _(EV: {p['ev']:+.3f})_{link_md}")
 
 
 def _exibir_arbitrage(arbs: list[dict], banca_sidebar: float, key_prefix: str) -> None:
