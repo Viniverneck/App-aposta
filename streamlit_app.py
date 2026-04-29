@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from main_engine import (
+    buscar_comparacao_odds,
     rodar_sistema,
     montar_multipla,
     get_arbitrage,
@@ -41,8 +42,9 @@ st.title("🚀 Trader PRO — Sistema Completo")
 # ---------------------------------------------------------------------------
 
 DEFAULTS = {
-    "res_fut": None, "res_nba": None,
-    "arbs_fut": None, "arbs_nba": None,
+    "res_fut": None, "res_nba": None, "res_tenis": None,
+    "arbs_fut": None, "arbs_nba": None, "arbs_tenis": None,
+    "comparacao": None,
     "banca": 1_000.0, "qtd": 10,
 }
 for k, v in DEFAULTS.items():
@@ -54,6 +56,8 @@ for k, v in DEFAULTS.items():
 # ---------------------------------------------------------------------------
 
 MERCADOS_FUTEBOL = ["ML","Totals","Over/Under","Asian Handicap","Corner","BTTS","Double Chance"]
+MERCADOS_TENIS = ["ML", "Spread (Games)", "Totals (Games)"]
+
 MERCADOS_NBA     = [
     "ML","Spread","Totals","ML HT","Spread HT","Totals HT",
     "Totals 1Q","Spread Q1","ML Q1",
@@ -89,12 +93,32 @@ with st.sidebar:
                               default=["ML","Spread","Totals",
                                        "Points O/U","Rebounds O/U","Assists O/U"],
                               label_visibility="collapsed")
+
+    st.caption("🎾 Mercados Tênis")
+    sel_tenis = st.multiselect("Tênis", MERCADOS_TENIS,
+                                default=["ML","Spread (Games)","Totals (Games)"],
+                                label_visibility="collapsed")
     st.divider()
     st.caption("🗄️ Cache: Eventos 5min · Value Bets 30s · Stats 24h · Arb ao vivo")
 
-    col_b1, col_b2 = st.columns(2)
-    buscar_fut = col_b1.button("⚽ Buscar Futebol", use_container_width=True)
-    buscar_nba = col_b2.button("🏀 Buscar NBA",     use_container_width=True)
+    col_b1, col_b2, col_b3 = st.columns(3)
+    buscar_fut   = col_b1.button("⚽ Futebol", use_container_width=True)
+    buscar_nba   = col_b2.button("🏀 NBA",     use_container_width=True)
+    buscar_tenis = col_b3.button("🎾 Tênis",   use_container_width=True)
+
+    st.divider()
+    st.markdown("**🔍 Comparação de Odds**")
+    margem_max = st.slider(
+        "Margem máxima (%)", min_value=0.5, max_value=50.0, value=3.0, step=0.5,
+        help="Mostra linhas onde a soma das probs implícitas < 100+X%. Quanto menor, mais próximo de arb real."
+    )
+    esp_comp = st.multiselect(
+        "Esportes",
+        ["Football", "Basketball", "Tennis"],
+        default=["Football", "Basketball", "Tennis"],
+        label_visibility="collapsed",
+    )
+    buscar_comp = st.button("🔍 Comparar Odds", use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Execução ao clicar
@@ -125,6 +149,25 @@ if buscar_nba:
         )
     st.session_state["banca"] = banca
     st.session_state["qtd"]   = qtd
+
+if buscar_tenis:
+    with st.spinner("Buscando tênis..."):
+        st.session_state["res_tenis"]  = rodar_sistema(
+            odd_min, odd_max, set(sel_tenis) or None, stats_ligas={}, modo="tenis"
+        )
+    with st.spinner("Buscando arbitragens de tênis..."):
+        st.session_state["arbs_tenis"] = processar_arbitrage(
+            get_arbitrage(limit=50), esporte="tenis"
+        )
+    st.session_state["banca"] = banca
+    st.session_state["qtd"]   = qtd
+
+if buscar_comp:
+    with st.spinner("Comparando odds Bet365 x Betano..."):
+        st.session_state["comparacao"] = buscar_comparacao_odds(
+            esportes=esp_comp if esp_comp else ["Football","Basketball","Tennis"],
+            margem_max=margem_max,
+        )
 
 banca_ref = st.session_state["banca"]
 qtd_ref   = st.session_state["qtd"]
@@ -429,12 +472,201 @@ def _render_nba():
 
 
 # ---------------------------------------------------------------------------
-# Layout principal — toggle ⚽ / 🏀
+# MODO TÊNIS
+# ---------------------------------------------------------------------------
+
+def _render_tenis():
+    res  = st.session_state["res_tenis"]
+    arbs = st.session_state["arbs_tenis"]
+
+    if res is None:
+        st.info("Clique em **🎾 Tênis** na sidebar para iniciar.")
+        return
+
+    aba_ev, aba_arb = st.tabs(["📊 Oportunidades EV", "⚖️ Arbitragem"])
+
+    with aba_ev:
+        if not res:
+            st.warning("Nenhuma oportunidade de tênis encontrada.")
+        else:
+            df = (
+                pd.DataFrame(res)
+                .sort_values("ev", ascending=False)
+                .head(qtd_ref).reset_index(drop=True)
+            )
+            m1,m2,m3,m4 = st.columns(4)
+            m1.metric("Picks",     len(df))
+            m2.metric("EV médio",  f"{df['ev'].mean():+.3f}")
+            m3.metric("Odd média", f"{df['odd'].mean():.2f}")
+            m4.metric("EV > 0",    int((df["ev"]>0).sum()))
+
+            # Tabela específica de tênis: jogadores, torneio, mercado, linha
+            RENAME_TEN = {
+                "jogo":"Partida","liga":"Torneio","horario":"Horário",
+                "mercado":"Mercado","tipo":"Descrição","linha":"Linha",
+                "casa":"Casa","odd":"Odd","prob_modelo":"Prob.(%)","ev":"EV","fonte":"Fonte",
+            }
+            cols_ten = [c for c in RENAME_TEN if c in df.columns]
+            styled = (
+                df[cols_ten].rename(columns=RENAME_TEN).style
+                .map(_cor_ev, subset=["EV"])
+                .format({"Odd":"{:.2f}","Prob.(%)":"{:.1f}%","EV":"{:+.3f}"})
+            )
+            st.dataframe(styled, width="stretch", hide_index=True)
+            _exibir_links_picks(df, "tenis_ev")
+            st.divider()
+            _exibir_multipla(res, banca_ref, "tenis")
+
+    with aba_arb:
+        if arbs:
+            a1,a2,a3 = st.columns(3)
+            a1.metric("Oportunidades", len(arbs))
+            a2.metric("Maior lucro",   f"{arbs[0]['profit_pct']:.2f}%")
+            a3.metric("Lucro médio",   f"{sum(a['profit_pct'] for a in arbs)/len(arbs):.2f}%")
+        _exibir_arbitrage(arbs or [], banca_ref, "tenis")
+
+
+# ---------------------------------------------------------------------------
+# Layout principal — toggle ⚽ / 🏀 / 🎾
+# ---------------------------------------------------------------------------
+
+def _render_comparacao():
+    dados = st.session_state["comparacao"]
+
+    if dados is None:
+        st.info("Configure os parâmetros em **🔍 Comparação de Odds** na sidebar e clique em **Comparar Odds**.")
+        return
+
+    if not dados:
+        st.warning("Nenhuma linha encontrada com os filtros configurados. Tente aumentar a margem máxima.")
+        return
+
+    arbs_reais = [d for d in dados if d["eh_arb"]]
+
+    # Métricas
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Linhas encontradas",   len(dados))
+    m2.metric("Arbs reais (< 100%)",  len(arbs_reais), delta="🔥" if arbs_reais else None)
+    m3.metric("Menor margem",         f"{dados[0]['margem_pct']:.2f}%")
+    m4.metric("Com Betano",           sum(1 for d in dados if d["odd_betano_vb"] or d["odd_betano_op"]))
+
+    if arbs_reais:
+        st.error(f"🚨 {len(arbs_reais)} ARB(S) REAL(IS) DETECTADA(S) — Execute imediatamente!", icon="🚨")
+
+    st.markdown("---")
+
+    # Tabela principal
+    rows = []
+    for d in dados:
+        # Ícone de status
+        if d["eh_arb"]:
+            status = "🚨 ARB"
+        elif d["margem_pct"] < 101:
+            status = "🔥 Quente"
+        elif d["margem_pct"] < 102:
+            status = "⚡ Próximo"
+        else:
+            status = "👀 Monitorar"
+
+        rows.append({
+            "Status":        status,
+            "Jogo":          d["jogo"],
+            "Esporte":       d["esporte"],
+            "Horário":       d["horario"],
+            "Mercado":       d["mercado"],
+            "Tipo":          d["tipo"],
+            "Bet365 VB":     d["odd_b365_vb"],
+            "Bet365 Op":     d["odd_b365_op"],
+            "Betano VB":     d["odd_betano_vb"] or "—",
+            "Betano Op":     d["odd_betano_op"] or "—",
+            "Melhor VB":     d["melhor_vb"],
+            "Melhor Op":     d["melhor_op"],
+            "Margem (%)":    d["margem_pct"],
+        })
+
+    df = pd.DataFrame(rows).sort_values(["Horário", "Margem (%)"])
+
+    def _cor_margem(val):
+        if isinstance(val, float):
+            if val < 100:   return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
+            if val < 101:   return "color:#e74c3c;font-weight:500"
+            if val < 102:   return "color:#e67e22;font-weight:500"
+        return ""
+
+    styled = (
+        df.style
+        .map(_cor_margem, subset=["Margem (%)"])
+        .format({"Margem (%)": "{:.2f}%", "Bet365 VB": "{}", "Bet365 Op": "{}",
+                 "Melhor VB": "{:.3f}", "Melhor Op": "{:.3f}"})
+    )
+    st.dataframe(styled, width="stretch", hide_index=True)
+
+    # Detalhes com links para execução
+    st.markdown("### 📌 Como executar")
+    for d in dados[:15]:
+        if d["eh_arb"]:
+            icone = "🚨"
+        elif d["margem_pct"] < 101:
+            icone = "🔥"
+        else:
+            icone = "👀"
+
+        label = f"{icone} {d['jogo']} | {d['mercado']} | Margem: {d['margem_pct']:.2f}%"
+        with st.expander(label, expanded=d["eh_arb"]):
+            st.markdown(f"**{d['jogo']}** — {d['liga']} — {d['horario']}")
+            st.markdown(f"Mercado: `{d['mercado']}` | Tipo: `{d['tipo']}`")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Bet365**")
+                link_b = d.get("link_b365", "")
+                label_b = f"[↗ Abrir Bet365]({link_b})" if link_b else "Sem link"
+                st.markdown(label_b)
+                st.metric(f"Lado {d['lado_vb'].upper()}", f"{d['odd_b365_vb']:.3f}")
+                st.metric(f"Lado {d['lado_op'].upper()}", f"{d['odd_b365_op']:.3f}")
+
+            with col2:
+                st.markdown("**Betano**")
+                link_n = d.get("link_betano", "")
+                label_n = f"[↗ Abrir Betano]({link_n})" if link_n else "Sem link direto"
+                st.markdown(label_n)
+                st.metric(f"Lado {d['lado_vb'].upper()}", f"{d['odd_betano_vb']:.3f}" if d['odd_betano_vb'] else "—")
+                st.metric(f"Lado {d['lado_op'].upper()}", f"{d['odd_betano_op']:.3f}" if d['odd_betano_op'] else "—")
+
+            st.divider()
+            if d["eh_arb"]:
+                lucro_por_100 = round(100 - (100/d["melhor_vb"] + 100/d["melhor_op"]), 2)
+                st.success(
+                    f"✅ ARB REAL — Aposte nos dois lados com as melhores odds. "
+                    f"Lucro estimado: R$ {lucro_por_100:.2f} por R$ 100 investidos."
+                )
+                # Calcular stakes ótimas para R$100
+                retorno = 100 + lucro_por_100
+                stake_vb = round(retorno / d["melhor_vb"], 2)
+                stake_op = round(retorno / d["melhor_op"], 2)
+                total    = round(stake_vb + stake_op, 2)
+                linhas_stakes = (
+                    f"**Stakes para R$ {total:.2f} investidos:**\n\n"
+                    f"- Lado `{d['lado_vb'].upper()}` @ {d['melhor_vb']:.3f} → **R$ {stake_vb:.2f}**\n"
+                    f"- Lado `{d['lado_op'].upper()}` @ {d['melhor_op']:.3f} → **R$ {stake_op:.2f}**"
+                )
+                st.markdown(linhas_stakes)
+            else:
+                st.info(
+                    f"Margem atual: {d['margem_pct']:.2f}% — "
+                    f"Falta {d['margem_pct']-100:.2f}% para virar arb real. "
+                    "Monitore — odds mudam rapidamente."
+                )
+
+
+# ---------------------------------------------------------------------------
+# Layout principal
 # ---------------------------------------------------------------------------
 
 modo = st.radio(
     "Modo",
-    ["⚽ Futebol", "🏀 NBA"],
+    ["⚽ Futebol", "🏀 NBA", "🎾 Tênis", "🔍 Comparação"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -443,5 +675,9 @@ st.divider()
 
 if modo == "⚽ Futebol":
     _render_futebol()
-else:
+elif modo == "🏀 NBA":
     _render_nba()
+elif modo == "🎾 Tênis":
+    _render_tenis()
+else:
+    _render_comparacao()
