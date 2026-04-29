@@ -39,6 +39,7 @@ EV_MINIMO: float = -0.20
 KELLY_MAX: float = 0.05
 JANELA_HORAS_FUTEBOL: int = 24
 JANELA_HORAS_NBA:     int = 48  # NBA joga à noite no fuso BR
+JANELA_HORAS_TENIS:   int = 24  # Tênis: torneios ao longo do dia
 FUSO_BRASIL = timezone(timedelta(hours=-3))
 
 LIGAS_PERMITIDAS: set[str] = {
@@ -67,6 +68,9 @@ LIGA_ESPORTE: dict[str, str] = {
     "brazil-copa-do-brasil":  "football",
     "usa-nba":                "basketball",
 }
+
+# Prefixos de slugs de tênis — usado para identificar value bets e arbs de tênis
+SLUGS_TENIS_PREFIXOS: tuple[str, ...] = ("atp-", "wta-", "challenger-", "itf-", "utr-")
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +183,62 @@ def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -
     # ── NBA — ML por período (HT, Q1) ─────────────────────────────────────
     if market_name in {"ML HT", "ML Q1"}:
         return f"{market_name} Vitoria {lado}"
+
+    # ── Tênis ────────────────────────────────────────────────────────────
+    if market_name == "Spread (Games)":
+        sufixo = f" {linha}" if linha is not None else ""
+        return f"Spread Games {lado.upper()}{sufixo}"
+    if market_name == "Totals (Games)":
+        lado_desc = "OVER" if lado == "home" else "UNDER"
+        return f"{lado_desc} {linha} games" if linha else f"Totals Games {lado_desc}"
+
+    # ── Player Props (Ice Hockey, NBA, etc.) ─────────────────────────────
+    # Formatos possíveis da API:
+    #   "Player Props - Alex Tuch (Goals)"
+    #   "Player Props - Collin Murray-Boyles (1) (Points)"  ← número de camisa
+    if market_name.startswith("Player Props - "):
+        import re
+        # Remove número de camisa entre parênteses: "Nome (1) (Stat)" → "Nome (Stat)"
+        nome_limpo = re.sub(r"\s*\(\d+\)\s*", " ", market_name).strip()
+        m = re.match(r"Player Props - (.+?)\s*\((.+?)\)\s*$", nome_limpo)
+        if m:
+            jogador  = m.group(1).strip()
+            stat_en  = m.group(2).strip()
+            stat_map = {
+                "Goals":   "Gols",   "Assists":  "Assistências",
+                "Points":  "Pontos", "Rebounds": "Rebotes",
+                "Steals":  "Roubos", "Blocks":   "Bloqueios",
+                "Saves":   "Defesas","Shots":    "Chutes",
+                "Threes":  "Três pontos",
+            }
+            stat_pt   = stat_map.get(stat_en, stat_en)
+            lado_desc = "OVER" if lado == "home" else "UNDER"
+            sufixo    = f" {linha}" if linha is not None else ""
+            return f"{jogador} — {stat_pt} {lado_desc}{sufixo}"
+        return f"{market_name} {lado}"
+
+    # ── Mercados com total/linha — home=OVER, away=UNDER ─────────────────
+    MERCADOS_TOTAL = {
+        "Totals", "Totals HT", "Corners Totals", "Corners Totals HT",
+        "Bookings Totals", "Total Maps",
+    }
+    if market_name in MERCADOS_TOTAL:
+        lado_desc = "OVER" if lado == "home" else "UNDER"
+        sufixo = f" {linha}" if linha is not None else ""
+        return f"{lado_desc}{sufixo}"
+
+    # ── Mercados de Spread ────────────────────────────────────────────────
+    MERCADOS_SPREAD = {
+        "Spread", "Spread HT", "Corners Spread",
+        "Bookings Spread", "Map Handicap",
+    }
+    if market_name in MERCADOS_SPREAD:
+        sufixo = f" {linha:+g}" if linha is not None else ""
+        return f"Handicap {lado.upper()}{sufixo}"
+
+    # ── Moneyline genérico (Esports usa "Moneyline" em vez de "ML") ───────
+    if market_name in {"Moneyline"}:
+        return f"Vitoria {lado}"
 
     # ── Fallback genérico ─────────────────────────────────────────────────
     return f"{market_name} {lado}"
@@ -323,14 +383,32 @@ def processar_value_bets(
     odd_min: float,
     odd_max: float,
     mercados_permitidos: set[str] | None,
+    modo: str = "todos",
 ) -> list[dict]:
     """
     Converte payload /value-bets no formato padrao de oportunidade.
     O EV vem do campo expectedValue da API — nao e estimativa manual.
+    modo: "futebol" | "nba" | "tenis" | "todos"
     """
     resultado: dict[str, dict] = {}
 
     for vb in raw:
+        esporte_vb = vb.get("event", {}).get("sport", "").lower()
+        liga_vb    = vb.get("event", {}).get("league", "")
+        slug_vb    = liga_vb.lower().replace(" ", "-").replace(",", "")
+
+        # Filtro de esporte por modo — corrige o bug de tênis aparecendo no futebol
+        # e bloqueia esportes não suportados (Esports, Cricket, Volleyball etc.)
+        ESPORTES_SUPORTADOS = {"football", "basketball", "tennis"}
+        if esporte_vb not in ESPORTES_SUPORTADOS:
+            continue
+        if modo == "futebol" and esporte_vb != "football":
+            continue
+        if modo == "nba" and esporte_vb != "basketball":
+            continue
+        if modo == "tenis" and esporte_vb != "tennis":
+            continue
+
         market_name: str = vb.get("market", {}).get("name", "")
         if mercados_permitidos and market_name not in mercados_permitidos:
             continue
@@ -361,13 +439,14 @@ def processar_value_bets(
         tipo = _resolver_tipo(market_name, bet_side, linha, None)
         prob_impl = round((1 / odd) * 100, 2) if odd > 0 else 50.0
 
-        # Value bets: URL base da casa (sem deep link de mercado específico)
-        URL_BASE_CASAS = {
-            "Bet365":  "https://www.bet365.com",
-            "Betano":  "https://www.betano.com.br",
-            "Pinnacle":"https://www.pinnacle.com",
-        }
-        link_vb = URL_BASE_CASAS.get(bookmaker, "")
+        # Deep link direto — corrige domínio para versão brasileira
+        def _fix_link(url: str) -> str:
+            return (url
+                .replace("https://www.bet365.com", "https://www.bet365.bet.br")
+                .replace("https://bet365.com",     "https://www.bet365.bet.br")
+                .replace("https://www.betano.com",  "https://www.betano.bet.br")
+                .replace("https://betano.com",      "https://www.betano.bet.br"))
+        link_vb = _fix_link(vb.get("bookmakerOdds", {}).get("href", ""))
 
         chave = f"{home} x {away} | {tipo} | {bookmaker} | vb"
         resultado[chave] = {
@@ -436,6 +515,7 @@ def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
 
         if esporte == "nba"     and slug not in SLUGS_NBA: continue
         if esporte == "futebol" and slug not in SLUGS_FUT: continue
+        if esporte == "tenis"   and not any(slug.startswith(p) for p in SLUGS_TENIS_PREFIXOS): continue
 
         resultado.append({
             "id": arb.get("id", ""),
@@ -521,12 +601,21 @@ def rodar_sistema(
 ) -> list[dict]:
     """
     Pipeline completo.
-    modo: "futebol" | "nba" | "todos"
+    modo: "futebol" | "nba" | "tenis" | "todos"
     stats_ligas: médias de gols — injetado pelo app (cache 24h).
+    Tênis usa SOMENTE value bets (odds/multi retorna 400 para tênis).
     """
     logger.info("=== SISTEMA INICIADO [modo=%s] ===", modo)
     if mercados_permitidos:
         logger.info("Mercados filtrados: %s", sorted(mercados_permitidos))
+
+    # Modo tênis: só value bets, sem pipeline Poisson
+    if modo == "tenis":
+        vb_raw = get_value_bets("Bet365")
+        result = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos, modo="tenis")
+        result.sort(key=lambda x: x["ev"], reverse=True)
+        logger.info("Tênis: %d oportunidades (value bets only)", len(result))
+        return result
 
     janela_horas = JANELA_HORAS_NBA if modo == "nba" else JANELA_HORAS_FUTEBOL
 
@@ -538,7 +627,7 @@ def rodar_sistema(
 
     # A. Value bets (filtradas por modo após processar)
     vb_raw = get_value_bets("Bet365")
-    oportunidades_vb_todos = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos)
+    oportunidades_vb_todos = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos, modo=modo)
 
     LIGAS_NBA_NOMES = {"USA - NBA", "NBA"}
     LIGAS_FUT_NOMES = {l for l, e in LIGA_ESPORTE.items() if e == "football"}
@@ -549,6 +638,8 @@ def rodar_sistema(
         oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") not in LIGAS_NBA_NOMES]
     else:
         oportunidades_vb = oportunidades_vb_todos
+
+    logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
 
     # B. Odds multi + Poisson
     eventos = get_events()
@@ -684,7 +775,12 @@ def rodar_sistema(
 
                     # Link direto: tenta a casa exata, fallback para Bet365
                     casa_base = casa.split(" ")[0]  # "Bet365 (no latency)" → "Bet365"
-                    link = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
+                    raw_link = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
+                    link = (raw_link
+                        .replace("https://www.bet365.com", "https://www.bet365.bet.br")
+                        .replace("https://bet365.com",     "https://www.bet365.bet.br")
+                        .replace("https://www.betano.com",  "https://www.betano.bet.br")
+                        .replace("https://betano.com",      "https://www.betano.bet.br"))
 
                     chave = f"{home} x {away} | {tipo} | {casa}"
                     resultados_poisson[chave] = {
@@ -715,7 +811,8 @@ def rodar_sistema(
     ]
 
     todos = oportunidades_vb + poisson_extra
-    todos.sort(key=lambda x: x["ev"], reverse=True)
+    # Ordenar por horário (mais próximo primeiro) e dentro do mesmo horário por EV
+    todos.sort(key=lambda x: (x.get("horario", ""), -x["ev"]))
 
     logger.info(
         "Oportunidades: %d value_bet_api + %d poisson = %d total",
@@ -768,3 +865,179 @@ def montar_multipla(resultados: list[dict], banca: float) -> dict:
         "ev": ev,
         "stake": round(banca * kelly, 2),
     }
+
+# ---------------------------------------------------------------------------
+# Comparação de odds Bet365 x Betano
+# ---------------------------------------------------------------------------
+
+def _corrigir_link_betano(href: str) -> str:
+    """Converte links Betano para domínio brasileiro."""
+    return (
+        href
+        .replace("www.betano.de", "betano.bet.br")
+        .replace("www.betano.com", "betano.bet.br")
+        .replace("//betano.de", "//betano.bet.br")
+        .replace("//betano.com", "//betano.bet.br")
+    )
+
+
+def buscar_comparacao_odds(
+    esportes: list[str] | None = None,
+    margem_max: float = 5.0,
+) -> list[dict]:
+    """
+    Cruza value bets de Bet365 e Betano pelo mesmo eventId + market + lado.
+    Calcula a margem da casa (soma das probs implícitas) e a divergência.
+
+    margem_max: filtra só linhas onde a soma das probs < (100 + margem_max)%.
+                Quanto menor, mais próximo de arb real.
+                Ex: 2.0 → só mostra onde soma < 102% (arb possível)
+                    5.0 → mostra divergências relevantes
+
+    Retorna lista ordenada por margem crescente (menores primeiro = mais perto de arb).
+    Custo: 2 chamadas de API (1 por bookmaker).
+    """
+    if esportes is None:
+        esportes = ["Football", "Basketball", "Tennis"]
+
+    ESPORTES_SET = {e.lower() for e in esportes}
+
+    # Buscar value bets das duas casas
+    vb_b365   = get_value_bets("Bet365")
+    vb_betano = get_value_bets("Betano")
+
+    # Indexar Betano por (eventId, market, lado) para lookup O(1)
+    idx_betano: dict[tuple, dict] = {}
+    for vb in vb_betano:
+        esp = vb.get("event", {}).get("sport", "").lower()
+        if esp not in ESPORTES_SET:
+            continue
+        chave = (
+            vb.get("eventId"),
+            vb.get("market", {}).get("name", ""),
+            vb.get("betSide", ""),
+        )
+        idx_betano[chave] = vb
+
+    # Cruzar com Bet365
+    resultado: list[dict] = []
+    vistos: set[tuple] = set()
+
+    for vb in vb_b365:
+        esp = vb.get("event", {}).get("sport", "").lower()
+        if esp not in ESPORTES_SET:
+            continue
+
+        event_id    = vb.get("eventId")
+        market_name = vb.get("market", {}).get("name", "")
+        bet_side    = vb.get("betSide", "")
+        linha       = vb.get("market", {}).get("hdp")
+
+        # Para ML de futebol há 3 lados (home/draw/away).
+        # lado_oposto é usado para buscar a Betano no lado complementar.
+        # Para draw, usamos 'home' como referência de comparação.
+        bk_odds  = vb.get("bookmakerOdds", {})
+        mkt_odds = vb.get("market", {})
+        lados_mkt = [l for l in ("home", "draw", "away") if mkt_odds.get(l)]
+
+        odd_b365_vb = float(bk_odds.get(bet_side, 0) or 0)
+        if odd_b365_vb <= 1:
+            continue
+
+        if bet_side == "home":
+            lado_oposto = "away"
+        elif bet_side == "away":
+            lado_oposto = "home"
+        else:
+            lado_oposto = "home"  # draw — compara com home
+
+        odd_b365_op = float(bk_odds.get(lado_oposto, 0) or 0)
+        if odd_b365_op <= 1:
+            continue
+
+        # Margem completa considerando todos os lados do mercado
+        soma_probs_b365 = sum(
+            1 / float(bk_odds.get(l, 0) or 999)
+            for l in lados_mkt
+            if float(bk_odds.get(l, 0) or 0) > 1
+        )
+
+        # Procurar o mesmo mercado + lado oposto na Betano
+        chave_op = (event_id, market_name, lado_oposto)
+        vb_betano_op = idx_betano.get(chave_op)
+
+        if vb_betano_op:
+            # Betano tem value bet no lado oposto — comparação direta
+            odd_betano_op = float(vb_betano_op.get("bookmakerOdds", {}).get(lado_oposto, 0) or 0)
+            odd_betano_vb = float(vb_betano_op.get("bookmakerOdds", {}).get(bet_side, 0) or 0)
+            link_betano = _corrigir_link_betano(vb_betano_op.get("bookmakerOdds", {}).get("href", ""))
+        else:
+            # Betano não tem value bet, mas pode ter odd no mesmo payload de odds/multi
+            # Usamos a odd da Bet365 como referência para o lado oposto
+            odd_betano_op = 0.0
+            odd_betano_vb = 0.0
+            link_betano = ""
+
+        # Melhor odd de cada lado entre as duas casas
+        melhor_vb = max(odd_b365_vb, odd_betano_vb) if odd_betano_vb > 1 else odd_b365_vb
+        melhor_op = max(odd_b365_op, odd_betano_op) if odd_betano_op > 1 else odd_b365_op
+
+        if melhor_vb <= 1 or melhor_op <= 1:
+            continue
+
+        # Margem: para 2 lados usa prob_vb+prob_op; para 3 lados (ML futebol) usa soma_probs_b365
+        if len(lados_mkt) == 3 and soma_probs_b365 > 0:
+            margem = round(soma_probs_b365 * 100, 2)
+        else:
+            margem = round((1/melhor_vb + 1/melhor_op) * 100, 2)
+
+        if margem > (100 + margem_max):
+            continue
+
+        # Evitar duplicatas (mesmo evento + mercado)
+        chave_linha = (event_id, market_name, frozenset([bet_side, lado_oposto]))
+        if chave_linha in vistos:
+            continue
+        vistos.add(chave_linha)
+
+        event_info = vb.get("event", {})
+        link_b365  = (
+            vb.get("bookmakerOdds", {}).get("href", "")
+            .replace("www.bet365.com", "bet365.bet.br")
+            .replace("//bet365.com", "//bet365.bet.br")
+        )
+
+        # Descrição clara: para ML mostra o lado específico da value bet
+        tipo_desc = _resolver_tipo(market_name, bet_side, linha, None)
+
+        resultado.append({
+            "jogo":         f"{event_info.get('home','?')} x {event_info.get('away','?')}",
+            "esporte":      event_info.get("sport", ""),
+            "liga":         event_info.get("league", ""),
+            "horario":      _fmt_horario(event_info.get("date", "")),
+            "mercado":      market_name,
+            "tipo":         tipo_desc,
+            "linha":        linha,
+            "lado_vb":      bet_side,
+            "lado_op":      lado_oposto,
+            # Odds Bet365
+            "odd_b365_vb":  round(odd_b365_vb, 3),
+            "odd_b365_op":  round(odd_b365_op, 3),
+            # Odds Betano
+            "odd_betano_vb": round(odd_betano_vb, 3) if odd_betano_vb > 1 else None,
+            "odd_betano_op": round(odd_betano_op, 3) if odd_betano_op > 1 else None,
+            # Melhor odd de cada lado
+            "melhor_vb":    round(melhor_vb, 3),
+            "melhor_op":    round(melhor_op, 3),
+            # Margem total (< 100% = arb real)
+            "margem_pct":   margem,
+            "eh_arb":       margem < 100.0,
+            # Links
+            "link_b365":    link_b365,
+            "link_betano":  link_betano,
+        })
+
+    # Ordenar por data/horário e depois por margem dentro do mesmo horário
+    resultado.sort(key=lambda x: (x["horario"], x["margem_pct"]))
+    logger.info("Comparação: %d linhas com margem <= %.1f%%", len(resultado), margem_max)
+    return resultado
