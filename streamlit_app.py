@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import time
+from datetime import datetime, timezone
 from main_engine import (
     buscar_comparacao_odds,
     rodar_sistema,
@@ -109,15 +111,40 @@ with st.sidebar:
     st.divider()
     st.markdown("**🔍 Comparação de Odds**")
     margem_max = st.slider(
-        "Margem máxima (%)", min_value=0.5, max_value=50.0, value=3.0, step=0.5,
-        help="Mostra linhas onde a soma das probs implícitas < 100+X%. Quanto menor, mais próximo de arb real."
+        "Margem máxima (%)", min_value=0.5, max_value=10.0, value=3.0, step=0.5,
+        help="Mostra onde soma das probs < 100+X%. Menor = mais próximo de arb.",
     )
     esp_comp = st.multiselect(
-        "Esportes",
-        ["Football", "Basketball", "Tennis"],
+        "Esportes", ["Football", "Basketball", "Tennis"],
         default=["Football", "Basketball", "Tennis"],
         label_visibility="collapsed",
     )
+    valor_invest = st.number_input(
+        "💰 Valor investido (R$)", min_value=10.0, max_value=100_000.0,
+        value=float(st.session_state.get("valor_invest", 100.0)), step=10.0,
+        help="Base para calcular stakes. Altere e veja o recálculo automático.",
+        key="valor_invest_input",
+    )
+    # Salvar imediatamente — recálculo de stakes sem precisar rebuscar
+    st.session_state["valor_invest"] = valor_invest
+
+    auto_refresh = st.toggle(
+        "🔄 Auto-refresh (só aba Comparação)",
+        value=st.session_state.get("auto_refresh", False),
+        help="Atualiza automaticamente só quando você está na aba 🔍 Comparação.",
+        key="auto_refresh_toggle",
+    )
+    st.session_state["auto_refresh"] = auto_refresh
+
+    if auto_refresh:
+        intervalo_refresh = st.select_slider(
+            "Intervalo", options=[1, 2, 5, 10],
+            value=st.session_state.get("intervalo_refresh", 2),
+            format_func=lambda x: f"{x} min",
+            key="intervalo_slider",
+        )
+        st.session_state["intervalo_refresh"] = intervalo_refresh
+
     buscar_comp = st.button("🔍 Comparar Odds", use_container_width=True)
 
 # ---------------------------------------------------------------------------
@@ -162,12 +189,17 @@ if buscar_tenis:
     st.session_state["banca"] = banca
     st.session_state["qtd"]   = qtd
 
+# Salvar esp_comp e margem_max para o auto-refresh usar
+st.session_state["esp_comp_cache"]  = esp_comp if esp_comp else ["Football","Basketball","Tennis"]
+st.session_state["margem_max_cache"] = margem_max
+
 if buscar_comp:
     with st.spinner("Comparando odds Bet365 x Betano..."):
         st.session_state["comparacao"] = buscar_comparacao_odds(
-            esportes=esp_comp if esp_comp else ["Football","Basketball","Tennis"],
+            esportes=st.session_state["esp_comp_cache"],
             margem_max=margem_max,
         )
+        st.session_state["comp_ts"] = time.time()
 
 banca_ref = st.session_state["banca"]
 qtd_ref   = st.session_state["qtd"]
@@ -530,133 +562,162 @@ def _render_tenis():
 # Layout principal — toggle ⚽ / 🏀 / 🎾
 # ---------------------------------------------------------------------------
 
+def _cor_data(horario: str) -> str:
+    """Verde se hoje, amarelo se amanhã."""
+    try:
+        agora_br = datetime.now(timezone.utc)
+        dia, mes = int(horario[:2]), int(horario[3:5])
+        if agora_br.day == dia and agora_br.month == mes:
+            return "background-color:#1a3a1a;color:#2ecc71;font-weight:500"
+        if agora_br.day + 1 == dia and agora_br.month == mes:
+            return "background-color:#3a2a00;color:#f0c040"
+    except Exception:
+        pass
+    return ""
+
+
 def _render_comparacao():
-    dados = st.session_state["comparacao"]
+    dados     = st.session_state["comparacao"]
+    valor_inv = st.session_state.get("valor_invest", 100.0)
+    auto_ref  = st.session_state.get("auto_refresh", False)
+    intervalo = st.session_state.get("intervalo_refresh", 2)
+    comp_ts   = st.session_state.get("comp_ts", 0.0)
+
+    # ── Auto-refresh ──────────────────────────────────────────────────────
+    if auto_ref and comp_ts > 0:
+        segundos = intervalo * 60
+        elapsed  = time.time() - comp_ts
+        restante = max(0, int(segundos - elapsed))
+        cr1, cr2 = st.columns([3, 1])
+        cr1.caption(f"🔄 Próxima atualização em {restante}s (intervalo: {intervalo} min)")
+        if cr2.button("Atualizar agora", key="refresh_now"):
+            elapsed = segundos
+        if elapsed >= segundos:
+            with st.spinner("Atualizando..."):
+                st.session_state["comparacao"] = buscar_comparacao_odds(
+                    esportes=st.session_state.get("esp_comp_cache", ["Football","Basketball","Tennis"]),
+                    margem_max=st.session_state.get("margem_max_cache", 3.0),
+                )
+                st.session_state["comp_ts"] = time.time()
+            st.rerun()
+        else:
+            time.sleep(1)
+            st.rerun()
 
     if dados is None:
         st.info("Configure os parâmetros em **🔍 Comparação de Odds** na sidebar e clique em **Comparar Odds**.")
         return
 
     if not dados:
-        st.warning("Nenhuma linha encontrada com os filtros configurados. Tente aumentar a margem máxima.")
+        st.warning("Nenhuma linha encontrada. Tente aumentar a margem máxima.")
         return
 
     arbs_reais = [d for d in dados if d["eh_arb"]]
+    quentes    = [d for d in dados if not d["eh_arb"] and d["margem_pct"] < 101]
 
-    # Métricas
+    # ── Métricas ──────────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Linhas encontradas",   len(dados))
-    m2.metric("Arbs reais (< 100%)",  len(arbs_reais), delta="🔥" if arbs_reais else None)
-    m3.metric("Menor margem",         f"{dados[0]['margem_pct']:.2f}%")
-    m4.metric("Com Betano",           sum(1 for d in dados if d["odd_betano_vb"] or d["odd_betano_op"]))
+    m1.metric("Linhas",        len(dados))
+    m2.metric("🚨 Arbs reais", len(arbs_reais))
+    m3.metric("🔥 Quentes",    len(quentes))
+    m4.metric("Menor margem",  f"{dados[0]['margem_pct']:.2f}%")
 
     if arbs_reais:
-        st.error(f"🚨 {len(arbs_reais)} ARB(S) REAL(IS) DETECTADA(S) — Execute imediatamente!", icon="🚨")
+        st.error(f"🚨 {len(arbs_reais)} ARB(S) DETECTADA(S) — Execute imediatamente!")
 
-    st.markdown("---")
+    st.divider()
 
-    # Tabela principal
+    # ── Tabela ordenada por margem ────────────────────────────────────────
     rows = []
     for d in dados:
-        # Ícone de status
-        if d["eh_arb"]:
-            status = "🚨 ARB"
-        elif d["margem_pct"] < 101:
-            status = "🔥 Quente"
-        elif d["margem_pct"] < 102:
-            status = "⚡ Próximo"
-        else:
-            status = "👀 Monitorar"
-
+        if d["eh_arb"]:              status = "🚨 ARB"
+        elif d["margem_pct"] < 101:  status = "🔥 Quente"
+        elif d["margem_pct"] < 102:  status = "⚡ Próximo"
+        else:                        status = "👀 Monitorar"
         rows.append({
-            "Status":        status,
-            "Jogo":          d["jogo"],
-            "Esporte":       d["esporte"],
-            "Horário":       d["horario"],
-            "Mercado":       d["mercado"],
-            "Tipo":          d["tipo"],
-            "Bet365 VB":     d["odd_b365_vb"],
-            "Bet365 Op":     d["odd_b365_op"],
-            "Betano VB":     d["odd_betano_vb"] or "—",
-            "Betano Op":     d["odd_betano_op"] or "—",
-            "Melhor VB":     d["melhor_vb"],
-            "Melhor Op":     d["melhor_op"],
-            "Margem (%)":    d["margem_pct"],
+            "Status":     status,
+            "Jogo":       d["jogo"],
+            "Esporte":    d["esporte"],
+            "Horário":    d["horario"],
+            "Mercado":    d["mercado"],
+            "Tipo":       d["tipo"],
+            "Bet365 VB":  d["odd_b365_vb"],
+            "Bet365 Op":  d["odd_b365_op"],
+            "Betano VB":  d["odd_betano_vb"] or "—",
+            "Betano Op":  d["odd_betano_op"] or "—",
+            "Melhor VB":  d["melhor_vb"],
+            "Melhor Op":  d["melhor_op"],
+            "Margem (%)": d["margem_pct"],
         })
 
-    df = pd.DataFrame(rows).sort_values(["Horário", "Margem (%)"])
+    df = pd.DataFrame(rows).sort_values(["Margem (%)", "Horário"])
 
     def _cor_margem(val):
         if isinstance(val, float):
-            if val < 100:   return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
-            if val < 101:   return "color:#e74c3c;font-weight:500"
-            if val < 102:   return "color:#e67e22;font-weight:500"
+            if val < 100: return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
+            if val < 101: return "color:#e74c3c;font-weight:500"
+            if val < 102: return "color:#e67e22;font-weight:500"
         return ""
 
     styled = (
         df.style
         .map(_cor_margem, subset=["Margem (%)"])
-        .format({"Margem (%)": "{:.2f}%", "Bet365 VB": "{}", "Bet365 Op": "{}",
-                 "Melhor VB": "{:.3f}", "Melhor Op": "{:.3f}"})
+        .map(_cor_data,   subset=["Horário"])
+        .format({"Margem (%)": "{:.2f}%",
+                 "Melhor VB":  "{:.3f}",
+                 "Melhor Op":  "{:.3f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
 
-    # Detalhes com links para execução
-    st.markdown("### 📌 Como executar")
-    for d in dados[:15]:
-        if d["eh_arb"]:
-            icone = "🚨"
-        elif d["margem_pct"] < 101:
-            icone = "🔥"
-        else:
-            icone = "👀"
+    # ── Expanders: arbs e quentes primeiro, expandidos ────────────────────
+    prioritarios = arbs_reais + quentes
+    resto        = [d for d in dados if d not in prioritarios][:max(0, 15 - len(prioritarios))]
+    lista_exp    = prioritarios + resto
 
-        label = f"{icone} {d['jogo']} | {d['mercado']} | Margem: {d['margem_pct']:.2f}%"
-        with st.expander(label, expanded=d["eh_arb"]):
+    st.markdown("### 📌 Como executar")
+    for d in lista_exp:
+        if d["eh_arb"]:              icone, exp = "🚨", True
+        elif d["margem_pct"] < 101:  icone, exp = "🔥", True
+        else:                        icone, exp = "👀", False
+
+        desc_vb = {"home":"Vitória Casa","away":"Vitória Fora","draw":"Empate"}.get(d["lado_vb"], d["lado_vb"].upper())
+        desc_op = {"home":"Vitória Casa","away":"Vitória Fora","draw":"Empate"}.get(d["lado_op"], d["lado_op"].upper())
+
+        label = f"{icone} {d['jogo']} | {d['mercado']} | {d['tipo']} | Margem: {d['margem_pct']:.2f}%"
+        with st.expander(label, expanded=exp):
             st.markdown(f"**{d['jogo']}** — {d['liga']} — {d['horario']}")
-            st.markdown(f"Mercado: `{d['mercado']}` | Tipo: `{d['tipo']}`")
 
             col1, col2 = st.columns(2)
-
             with col1:
                 st.markdown("**Bet365**")
-                link_b = d.get("link_b365", "")
-                label_b = f"[↗ Abrir Bet365]({link_b})" if link_b else "Sem link"
-                st.markdown(label_b)
-                st.metric(f"Lado {d['lado_vb'].upper()}", f"{d['odd_b365_vb']:.3f}")
-                st.metric(f"Lado {d['lado_op'].upper()}", f"{d['odd_b365_op']:.3f}")
-
+                link_b = d.get("link_b365","")
+                if link_b: st.markdown(f"[↗ Abrir Bet365]({link_b})")
+                st.metric(desc_vb, f"{d['odd_b365_vb']:.3f}")
+                st.metric(desc_op, f"{d['odd_b365_op']:.3f}")
             with col2:
                 st.markdown("**Betano**")
-                link_n = d.get("link_betano", "")
-                label_n = f"[↗ Abrir Betano]({link_n})" if link_n else "Sem link direto"
-                st.markdown(label_n)
-                st.metric(f"Lado {d['lado_vb'].upper()}", f"{d['odd_betano_vb']:.3f}" if d['odd_betano_vb'] else "—")
-                st.metric(f"Lado {d['lado_op'].upper()}", f"{d['odd_betano_op']:.3f}" if d['odd_betano_op'] else "—")
+                link_n = d.get("link_betano","")
+                if link_n: st.markdown(f"[↗ Abrir Betano]({link_n})")
+                else:      st.caption("Sem link direto")
+                st.metric(desc_vb, f"{d['odd_betano_vb']:.3f}" if d["odd_betano_vb"] else "—")
+                st.metric(desc_op, f"{d['odd_betano_op']:.3f}" if d["odd_betano_op"] else "—")
 
             st.divider()
             if d["eh_arb"]:
-                lucro_por_100 = round(100 - (100/d["melhor_vb"] + 100/d["melhor_op"]), 2)
-                st.success(
-                    f"✅ ARB REAL — Aposte nos dois lados com as melhores odds. "
-                    f"Lucro estimado: R$ {lucro_por_100:.2f} por R$ 100 investidos."
+                retorno_alvo = valor_inv / (1/d["melhor_vb"] + 1/d["melhor_op"])
+                stake_vb     = round(retorno_alvo / d["melhor_vb"], 2)
+                stake_op     = round(retorno_alvo / d["melhor_op"], 2)
+                total        = round(stake_vb + stake_op, 2)
+                lucro        = round(retorno_alvo - total, 2)
+                st.success(f"✅ ARB REAL — R$ {lucro:.2f} de lucro com R$ {total:.2f} investidos")
+                st.markdown(
+                    f"- **{desc_vb}** @ {d['melhor_vb']:.3f} → apostar **R$ {stake_vb:.2f}**\n"
+                    f"- **{desc_op}** @ {d['melhor_op']:.3f} → apostar **R$ {stake_op:.2f}**"
                 )
-                # Calcular stakes ótimas para R$100
-                retorno = 100 + lucro_por_100
-                stake_vb = round(retorno / d["melhor_vb"], 2)
-                stake_op = round(retorno / d["melhor_op"], 2)
-                total    = round(stake_vb + stake_op, 2)
-                linhas_stakes = (
-                    f"**Stakes para R$ {total:.2f} investidos:**\n\n"
-                    f"- Lado `{d['lado_vb'].upper()}` @ {d['melhor_vb']:.3f} → **R$ {stake_vb:.2f}**\n"
-                    f"- Lado `{d['lado_op'].upper()}` @ {d['melhor_op']:.3f} → **R$ {stake_op:.2f}**"
-                )
-                st.markdown(linhas_stakes)
             else:
                 st.info(
-                    f"Margem atual: {d['margem_pct']:.2f}% — "
-                    f"Falta {d['margem_pct']-100:.2f}% para virar arb real. "
-                    "Monitore — odds mudam rapidamente."
+                    f"Margem: {d['margem_pct']:.2f}% — falta {d['margem_pct']-100:.2f}% "
+                    "para arb real. Odds mudam rápido — monitore."
                 )
 
 
