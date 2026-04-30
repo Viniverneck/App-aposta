@@ -14,6 +14,7 @@ from main_engine import (
     LIGA_ESPORTE,
 )
 from stats_historicas import buscar_stats_ligas
+from telegram_alert import alertar_arbs, testar_conexao
 
 # ---------------------------------------------------------------------------
 # Cache
@@ -46,8 +47,12 @@ st.title("🚀 Trader PRO — Sistema Completo")
 DEFAULTS = {
     "res_fut": None, "res_nba": None, "res_tenis": None,
     "arbs_fut": None, "arbs_nba": None, "arbs_tenis": None,
-    "comparacao": None,
+    "comparacao": None, "comp_ts": 0.0,
     "banca": 1_000.0, "qtd": 10,
+    "valor_invest": 100.0, "intervalo_refresh": 2,
+    "auto_refresh": False,
+    "telegram_ativo": False,
+    "ids_alertados": set(),
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -145,6 +150,22 @@ with st.sidebar:
         )
         st.session_state["intervalo_refresh"] = intervalo_refresh
 
+    st.divider()
+    st.markdown("**📱 Alertas Telegram**")
+    telegram_ativo = st.toggle(
+        "🔔 Alertar arb real no Telegram",
+        value=st.session_state.get("telegram_ativo", False),
+        help="Envia mensagem no Telegram quando uma arb real for detectada.",
+        key="telegram_toggle",
+    )
+    st.session_state["telegram_ativo"] = telegram_ativo
+    if telegram_ativo:
+        if st.button("📡 Testar conexão Telegram", use_container_width=True, key="test_tg"):
+            if testar_conexao():
+                st.success("✅ Bot conectado! Verifique o Telegram.")
+            else:
+                st.error("❌ Falhou. Verifique TELEGRAM_TOKEN e TELEGRAM_CHAT_ID no .env")
+
     buscar_comp = st.button("🔍 Comparar Odds", use_container_width=True)
 
 # ---------------------------------------------------------------------------
@@ -200,6 +221,12 @@ if buscar_comp:
             margem_max=margem_max,
         )
         st.session_state["comp_ts"] = time.time()
+        if st.session_state.get("telegram_ativo"):
+            st.session_state["ids_alertados"] = alertar_arbs(
+                st.session_state["comparacao"],
+                valor_invest=st.session_state.get("valor_invest", 100.0),
+                ids_ja_enviados=st.session_state.get("ids_alertados", set()),
+            )
 
 banca_ref = st.session_state["banca"]
 qtd_ref   = st.session_state["qtd"]
@@ -599,6 +626,12 @@ def _render_comparacao():
                     margem_max=st.session_state.get("margem_max_cache", 3.0),
                 )
                 st.session_state["comp_ts"] = time.time()
+                if st.session_state.get("telegram_ativo"):
+                    st.session_state["ids_alertados"] = alertar_arbs(
+                        st.session_state["comparacao"],
+                        valor_invest=st.session_state.get("valor_invest", 100.0),
+                        ids_ja_enviados=st.session_state.get("ids_alertados", set()),
+                    )
             st.rerun()
         else:
             time.sleep(1)
