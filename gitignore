@@ -19,3 +19,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Cache de alertas Telegram enviados
+.telegram_ids_enviados.json
