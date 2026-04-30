@@ -934,6 +934,15 @@ def montar_multipla(resultados: list[dict], banca: float) -> dict:
 # Comparação de odds Bet365 x Betano
 # ---------------------------------------------------------------------------
 
+
+def _safe_float(val, default=0.0):
+    try:
+        f = float(val)
+        return f if f > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _corrigir_link_betano(href: str) -> str:
     """Converte links Betano para domínio brasileiro."""
     return (
@@ -1004,7 +1013,7 @@ def buscar_comparacao_odds(
         mkt_odds = vb.get("market", {})
         lados_mkt = [l for l in ("home", "draw", "away") if mkt_odds.get(l)]
 
-        odd_b365_vb = float(bk_odds.get(bet_side, 0) or 0)
+        odd_b365_vb = _safe_float(bk_odds.get(bet_side))
         if odd_b365_vb <= 1:
             continue
 
@@ -1015,15 +1024,15 @@ def buscar_comparacao_odds(
         else:
             lado_oposto = "home"  # draw — compara com home
 
-        odd_b365_op = float(bk_odds.get(lado_oposto, 0) or 0)
+        odd_b365_op = _safe_float(bk_odds.get(lado_oposto))
         if odd_b365_op <= 1:
             continue
 
         # Margem completa considerando todos os lados do mercado
         soma_probs_b365 = sum(
-            1 / float(bk_odds.get(l, 0) or 999)
+            1 / _safe_float(bk_odds.get(l), default=999)
             for l in lados_mkt
-            if float(bk_odds.get(l, 0) or 0) > 1
+            if _safe_float(bk_odds.get(l)) > 1
         )
 
         # Procurar o mesmo mercado + lado oposto na Betano
@@ -1032,8 +1041,8 @@ def buscar_comparacao_odds(
 
         if vb_betano_op:
             # Betano tem value bet no lado oposto — comparação direta
-            odd_betano_op = float(vb_betano_op.get("bookmakerOdds", {}).get(lado_oposto, 0) or 0)
-            odd_betano_vb = float(vb_betano_op.get("bookmakerOdds", {}).get(bet_side, 0) or 0)
+            odd_betano_op = _safe_float(vb_betano_op.get("bookmakerOdds", {}).get(lado_oposto))
+            odd_betano_vb = _safe_float(vb_betano_op.get("bookmakerOdds", {}).get(bet_side))
             link_betano = _corrigir_link_betano(vb_betano_op.get("bookmakerOdds", {}).get("href", ""))
         else:
             # Betano não tem value bet, mas pode ter odd no mesmo payload de odds/multi
