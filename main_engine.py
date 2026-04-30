@@ -129,119 +129,183 @@ def score_evento(evento: dict) -> float:
 # Helpers de mercado
 # ---------------------------------------------------------------------------
 
-# Mercados NBA que usam linha (spread/total) — exibem o valor da linha
-_MERCADOS_COM_LINHA_NBA: set[str] = {
-    "Spread", "Totals", "Spread HT", "Totals HT", "Totals 1Q", "Spread Q1",
-    "Team Total Home", "Team Total Away", "Alternative Totals", "Alternative Spread",
-    "Points O/U", "Rebounds O/U", "Assists O/U", "Steals O/U", "Blocks O/U",
-    "Field Goals Made O/U", "Threes Made O/U",
-    "Points & Rebounds O/U", "Points & Assists O/U",
-    "Assists & Rebounds O/U", "Points, Assists & Rebounds O/U",
-    "Steals & Blocks O/U",
+import re as _re
+
+# Stat map para Player Props
+_STAT_MAP = {
+    "Goals": "Gols", "Assists": "Assistências", "Points": "Pontos",
+    "Rebounds": "Rebotes", "Steals": "Roubos", "Blocks": "Bloqueios",
+    "Saves": "Defesas", "Shots": "Chutes", "Threes": "3 Pontos",
 }
 
-# Mercados NBA sem linha — exibem só o lado (sim/não, ocorre/não ocorre)
-_MERCADOS_SIM_NAO_NBA: set[str] = {
+# Mercados sim/não (NBA)
+_MERCADOS_SIM_NAO: set[str] = {
     "Double Double", "Triple Double",
     "Player First Basket", "Player First Assist", "Player First Rebound",
 }
 
-# Mercados de milestones — jogador atinge X pontos/rebotes/assistências
-_MERCADOS_MILESTONE_NBA: set[str] = {
+# Mercados de milestone (NBA)
+_MERCADOS_MILESTONE: set[str] = {
     "Player Points Milestones", "Player Rebounds Milestones",
     "Player Assists Milestones", "Player Threes Milestones",
 }
 
 
 def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -> str:
-    """Converte market + lado em descrição legível para futebol e NBA."""
+    """
+    Converte market + lado em descrição clara, igual à linguagem das casas de apostas.
+    home = OVER / Mais de / Casa
+    away = UNDER / Menos de / Fora
+    draw = Empate
+    """
+    lado_l = lado.lower()
 
-    # ── Futebol ──────────────────────────────────────────────────────────────
-    if market_name == "ML" and linha is None:
-        return f"Vitoria {lado}"
     if label:
         return label
-    if market_name in {"Totals", "Over/Under"} and linha is not None:
-        return f"{lado.upper()} {linha} gols"
-    if "Corner" in market_name:
-        return f"{lado.upper()} {linha} escanteios" if linha else f"{lado.upper()} escanteios"
 
-    # ── NBA — mercados com linha numérica ─────────────────────────────────
-    if market_name in _MERCADOS_COM_LINHA_NBA:
-        sufixo = f" {linha}" if linha is not None else ""
-        return f"{market_name} {lado.upper()}{sufixo}"
+    # ── ML / Moneyline ────────────────────────────────────────────────────
+    if market_name in {"ML", "Moneyline"}:
+        return {"home": "Vitória Casa", "away": "Vitória Fora", "draw": "Empate"}.get(lado_l, f"ML {lado}")
 
-    # ── NBA — sim/não (Double Double, Player First Basket etc.) ──────────
-    if market_name in _MERCADOS_SIM_NAO_NBA:
-        return f"{market_name} — {lado}"
+    # ── ML por período ────────────────────────────────────────────────────
+    if market_name == "ML HT":
+        return {"home": "Vitória Casa (1ºT)", "away": "Vitória Fora (1ºT)", "draw": "Empate (1ºT)"}.get(lado_l, f"ML HT {lado}")
+    if market_name in {"ML Q1", "ML 1Q"}:
+        return {"home": "Vitória Casa (1ºQ)", "away": "Vitória Fora (1ºQ)", "draw": "Empate (1ºQ)"}.get(lado_l, f"ML Q1 {lado}")
 
-    # ── NBA — milestones de jogador ───────────────────────────────────────
-    if market_name in _MERCADOS_MILESTONE_NBA:
-        sufixo = f" {linha}" if linha is not None else ""
-        return f"{market_name}{sufixo} — {lado}"
+    # ── Totais de gols — Futebol ──────────────────────────────────────────
+    if market_name in {"Totals", "Over/Under"}:
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} gols" if linha is not None else f"{direcao} gols"
 
-    # ── NBA — ML por período (HT, Q1) ─────────────────────────────────────
-    if market_name in {"ML HT", "ML Q1"}:
-        return f"{market_name} Vitoria {lado}"
+    if market_name == "Totals HT":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} gols (1ºT)" if linha is not None else f"{direcao} gols (1ºT)"
 
-    # ── Tênis ────────────────────────────────────────────────────────────
-    if market_name == "Spread (Games)":
-        sufixo = f" {linha}" if linha is not None else ""
-        return f"Spread Games {lado.upper()}{sufixo}"
-    if market_name == "Totals (Games)":
-        lado_desc = "OVER" if lado == "home" else "UNDER"
-        return f"{lado_desc} {linha} games" if linha else f"Totals Games {lado_desc}"
+    # ── Escanteios ────────────────────────────────────────────────────────
+    if market_name == "Corners Totals":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} escanteios" if linha is not None else f"{direcao} escanteios"
 
-    # ── Player Props (Ice Hockey, NBA, etc.) ─────────────────────────────
-    # Formatos possíveis da API:
-    #   "Player Props - Alex Tuch (Goals)"
-    #   "Player Props - Collin Murray-Boyles (1) (Points)"  ← número de camisa
+    if market_name == "Corners Totals HT":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} escanteios (1ºT)" if linha is not None else f"{direcao} escanteios (1ºT)"
+
+    if market_name == "Corners Spread":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap Escanteios {time}{hdp}"
+
+    # ── Cartões ───────────────────────────────────────────────────────────
+    if market_name == "Bookings Spread":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap Cartões {time}{hdp}"
+
+    # ── Spread / Handicap Asiático — Futebol ──────────────────────────────
+    if market_name == "Spread":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap {time}{hdp}"
+
+    if market_name == "Spread HT":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap {time}{hdp} (1ºT)"
+
+    # ── NBA — Totais de pontos ────────────────────────────────────────────
+    if market_name == "Totals 1Q":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} pontos (1ºQ)" if linha is not None else f"{direcao} pts (1ºQ)"
+
+    if market_name in {"Team Total Home", "Team Total Away"}:
+        time = "Casa" if "Home" in market_name else "Fora"
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} pts ({time})" if linha is not None else f"{direcao} pts ({time})"
+
+    if market_name in {"Alternative Totals", "Points O/U"}:
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} pontos" if linha is not None else f"{direcao} pontos"
+
+    # ── NBA — Stats de jogadores ──────────────────────────────────────────
+    _NBA_STATS = {
+        "Rebounds O/U":   "Rebotes",
+        "Assists O/U":    "Assistências",
+        "Steals O/U":     "Roubos de bola",
+        "Blocks O/U":     "Bloqueios",
+        "Field Goals Made O/U": "Cestas convertidas",
+        "Threes Made O/U":      "Cestas de 3 pts",
+    }
+    if market_name in _NBA_STATS:
+        stat = _NBA_STATS[market_name]
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} {stat}" if linha is not None else f"{direcao} {stat}"
+
+    _NBA_COMBO = {
+        "Points & Rebounds O/U":              "Pts+Reb",
+        "Points & Assists O/U":               "Pts+Ast",
+        "Assists & Rebounds O/U":             "Ast+Reb",
+        "Points, Assists & Rebounds O/U":     "Pts+Ast+Reb",
+        "Steals & Blocks O/U":                "Roubo+Bloq",
+    }
+    if market_name in _NBA_COMBO:
+        combo = _NBA_COMBO[market_name]
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} {combo}" if linha is not None else f"{direcao} {combo}"
+
+    # ── NBA — Spread / Handicap ───────────────────────────────────────────
+    if market_name in {"Alternative Spread", "Spread Q1"}:
+        time = "Casa" if lado_l == "home" else "Fora"
+        periodo = " (1ºQ)" if "Q1" in market_name else ""
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap {time}{hdp}{periodo}"
+
+    # ── NBA — Sim/Não ─────────────────────────────────────────────────────
+    if market_name in _MERCADOS_SIM_NAO:
+        return f"{market_name} — {'Sim' if lado_l == 'home' else 'Não'}"
+
+    # ── NBA — Milestones ──────────────────────────────────────────────────
+    if market_name in _MERCADOS_MILESTONE:
+        stat_nome = market_name.replace("Player ", "").replace(" Milestones", "")
+        direcao = "Atinge" if lado_l == "home" else "Não atinge"
+        return f"{direcao} {linha} {stat_nome}" if linha is not None else f"{direcao} {stat_nome}"
+
+    # ── Player Props (NBA, NHL, etc.) ─────────────────────────────────────
     if market_name.startswith("Player Props - "):
-        import re
-        # Remove número de camisa entre parênteses: "Nome (1) (Stat)" → "Nome (Stat)"
-        nome_limpo = re.sub(r"\s*\(\d+\)\s*", " ", market_name).strip()
-        m = re.match(r"Player Props - (.+?)\s*\((.+?)\)\s*$", nome_limpo)
+        nome_limpo = _re.sub(r"\s*\(\d+\)\s*", " ", market_name).strip()
+        m = _re.match(r"Player Props - (.+?)\s*\((.+?)\)\s*$", nome_limpo)
         if m:
             jogador  = m.group(1).strip()
             stat_en  = m.group(2).strip()
-            stat_map = {
-                "Goals":   "Gols",   "Assists":  "Assistências",
-                "Points":  "Pontos", "Rebounds": "Rebotes",
-                "Steals":  "Roubos", "Blocks":   "Bloqueios",
-                "Saves":   "Defesas","Shots":    "Chutes",
-                "Threes":  "Três pontos",
-            }
-            stat_pt   = stat_map.get(stat_en, stat_en)
-            lado_desc = "OVER" if lado == "home" else "UNDER"
-            sufixo    = f" {linha}" if linha is not None else ""
-            return f"{jogador} — {stat_pt} {lado_desc}{sufixo}"
+            stat_pt  = _STAT_MAP.get(stat_en, stat_en)
+            direcao  = "Mais de" if lado_l == "home" else "Menos de"
+            sufixo   = f" {linha}" if linha is not None else ""
+            return f"{jogador} — {stat_pt}{sufixo} ({direcao})"
         return f"{market_name} {lado}"
 
-    # ── Mercados com total/linha — home=OVER, away=UNDER ─────────────────
-    MERCADOS_TOTAL = {
-        "Totals", "Totals HT", "Corners Totals", "Corners Totals HT",
-        "Bookings Totals", "Total Maps",
-    }
-    if market_name in MERCADOS_TOTAL:
-        lado_desc = "OVER" if lado == "home" else "UNDER"
-        sufixo = f" {linha}" if linha is not None else ""
-        return f"{lado_desc}{sufixo}"
+    # ── Tênis ─────────────────────────────────────────────────────────────
+    if market_name == "Spread (Games)":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap Games {time}{hdp}"
 
-    # ── Mercados de Spread ────────────────────────────────────────────────
-    MERCADOS_SPREAD = {
-        "Spread", "Spread HT", "Corners Spread",
-        "Bookings Spread", "Map Handicap",
-    }
-    if market_name in MERCADOS_SPREAD:
-        sufixo = f" {linha:+g}" if linha is not None else ""
-        return f"Handicap {lado.upper()}{sufixo}"
+    if market_name == "Totals (Games)":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} games" if linha is not None else f"{direcao} games"
 
-    # ── Moneyline genérico (Esports usa "Moneyline" em vez de "ML") ───────
-    if market_name in {"Moneyline"}:
-        return f"Vitoria {lado}"
+    # ── Esports ───────────────────────────────────────────────────────────
+    if market_name == "Total Maps":
+        direcao = "Mais de" if lado_l == "home" else "Menos de"
+        return f"{direcao} {linha} mapas" if linha is not None else f"{direcao} mapas"
 
-    # ── Fallback genérico ─────────────────────────────────────────────────
-    return f"{market_name} {lado}"
+    if market_name == "Map Handicap":
+        time = "Casa" if lado_l == "home" else "Fora"
+        hdp = f" ({linha:+g})" if linha is not None else ""
+        return f"Handicap Mapas {time}{hdp}"
+
+    # ── Fallback ──────────────────────────────────────────────────────────
+    lado_fmt = {"home": "Casa", "away": "Fora", "draw": "Empate"}.get(lado_l, lado)
+    return f"{market_name} — {lado_fmt}"
 
 
 def _extrair_linha_label(market: dict, odds_info: list) -> tuple[Any, str | None]:
