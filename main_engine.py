@@ -161,7 +161,11 @@ def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -
     lado_l = lado.lower()
 
     if label:
-        return label
+        # Limpar labels de props NBA: 'LeBron James (1) (6.5)' → só o nome
+        # Número de camisa e linha já ficam nas colunas próprias
+        label_limpo = _re.sub(r'\s*\(\d+\)\s*', ' ', label).strip()  # remove nº camisa
+        label_limpo = _re.sub(r'\s*\([\d.]+\)\s*$', '', label_limpo).strip()  # remove linha
+        return label_limpo if label_limpo else label
 
     # ── ML / Moneyline ────────────────────────────────────────────────────
     if market_name in {"ML", "Moneyline"}:
@@ -309,7 +313,11 @@ def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -
 
 
 def _extrair_linha_label(market: dict, odds_info: list) -> tuple[Any, str | None]:
-    """Extrai linha (handicap/total) e label de um market."""
+    """
+    Extrai linha (handicap/total) e label de um market.
+    Para props NBA, o label vem como "LeBron James (1) (6.5)" —
+    extrai a linha numérica e limpa o nome do jogador.
+    """
     linha = (
         market.get("line") or market.get("total")
         or market.get("points") or market.get("handicap")
@@ -325,6 +333,17 @@ def _extrair_linha_label(market: dict, odds_info: list) -> tuple[Any, str | None
             )
         if not label:
             label = item.get("label")
+
+    # Se ainda não temos linha mas temos label com valor entre parênteses no final,
+    # ex: "LeBron James (1) (6.5)" → extrai 6.5 como linha
+    if label and linha is None:
+        m = _re.search(r"\(([\d.]+)\)\s*$", label)
+        if m:
+            try:
+                linha = float(m.group(1))
+            except ValueError:
+                pass
+
     return linha, label
 
 
