@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone
 from main_engine import (
     buscar_comparacao_odds,
+    buscar_live_arb,
     rodar_sistema,
     montar_multipla,
     get_arbitrage,
@@ -48,6 +49,7 @@ DEFAULTS = {
     "res_fut": None, "res_nba": None, "res_tenis": None,
     "arbs_fut": None, "arbs_nba": None, "arbs_tenis": None,
     "comparacao": None, "comp_ts": 0.0,
+    "live_dados": None, "live_ts": 0.0,
     "banca": 1_000.0, "qtd": 10,
     "valor_invest": 100.0, "intervalo_refresh": 2,
     "auto_refresh": False,
@@ -168,6 +170,41 @@ with st.sidebar:
 
     buscar_comp = st.button("🔍 Comparar Odds", use_container_width=True)
 
+    st.divider()
+    st.markdown("**⚡ Live Arbitrage**")
+    esp_live = st.multiselect(
+        "Esportes live",
+        ["football", "basketball", "tennis"],
+        default=["football", "basketball", "tennis"],
+        label_visibility="collapsed",
+    )
+    mkt_live = st.multiselect(
+        "Mercados live",
+        ["ML", "Spread", "Totals", "Over/Under"],
+        default=["ML", "Spread", "Totals"],
+        label_visibility="collapsed",
+    )
+    margem_live = st.slider(
+        "Margem máx. live (%)", 0.5, 10.0, 3.0, 0.5,
+        help="Menor = mais perto de arb real ao vivo.",
+    )
+    auto_refresh_live = st.toggle(
+        "🔄 Auto-refresh live",
+        value=st.session_state.get("auto_refresh_live", False),
+        help="Atualiza automaticamente só na aba ⚡ Live.",
+        key="auto_refresh_live_toggle",
+    )
+    st.session_state["auto_refresh_live"] = auto_refresh_live
+    if auto_refresh_live:
+        intervalo_live = st.select_slider(
+            "Intervalo live", options=[1, 2, 5], value=1,
+            format_func=lambda x: f"{x} min",
+            key="intervalo_live_slider",
+        )
+        st.session_state["intervalo_live"] = intervalo_live
+    buscar_live = st.button("⚡ Buscar Live", use_container_width=True, type="primary")
+
+
 # ---------------------------------------------------------------------------
 # Execução ao clicar
 # ---------------------------------------------------------------------------
@@ -224,6 +261,24 @@ if buscar_comp:
         if st.session_state.get("telegram_ativo"):
             st.session_state["ids_alertados"] = alertar_arbs(
                 st.session_state["comparacao"],
+                valor_invest=st.session_state.get("valor_invest", 100.0),
+                ids_ja_enviados=st.session_state.get("ids_alertados", set()),
+            )
+
+if buscar_live:
+    with st.spinner("Buscando live arb..."):
+        st.session_state["live_dados"] = buscar_live_arb(
+            esportes=esp_live or ["football","basketball","tennis"],
+            mercados=mkt_live or ["ML","Spread","Totals"],
+            margem_max=margem_live,
+        )
+        st.session_state["live_ts"]  = time.time()
+        st.session_state["esp_live_cache"] = esp_live
+        st.session_state["mkt_live_cache"] = mkt_live
+        st.session_state["margem_live_cache"] = margem_live
+        if st.session_state.get("telegram_ativo") and st.session_state["live_dados"]:
+            st.session_state["ids_alertados"] = alertar_arbs(
+                st.session_state["live_dados"],
                 valor_invest=st.session_state.get("valor_invest", 100.0),
                 ids_ja_enviados=st.session_state.get("ids_alertados", set()),
             )
@@ -758,9 +813,152 @@ def _render_comparacao():
 # Layout principal
 # ---------------------------------------------------------------------------
 
+def _render_live():
+    dados    = st.session_state.get("live_dados")
+    live_ts  = st.session_state.get("live_ts", 0.0)
+    auto_ref = st.session_state.get("auto_refresh_live", False)
+    intervalo = st.session_state.get("intervalo_live", 1)
+    valor_inv = st.session_state.get("valor_invest", 100.0)
+
+    # ── Auto-refresh ──────────────────────────────────────────────────────
+    if auto_ref and live_ts > 0:
+        segundos = intervalo * 60
+        elapsed  = time.time() - live_ts
+        restante = max(0, int(segundos - elapsed))
+        cr1, cr2 = st.columns([3, 1])
+        cr1.caption(f"🔄 Atualização em {restante}s (intervalo: {intervalo} min)")
+        if cr2.button("Atualizar agora", key="live_refresh_now"):
+            elapsed = segundos
+        if elapsed >= segundos:
+            with st.spinner("Atualizando live..."):
+                st.session_state["live_dados"] = buscar_live_arb(
+                    esportes=st.session_state.get("esp_live_cache", ["football","basketball","tennis"]),
+                    mercados=st.session_state.get("mkt_live_cache", ["ML","Spread","Totals"]),
+                    margem_max=st.session_state.get("margem_live_cache", 3.0),
+                )
+                st.session_state["live_ts"] = time.time()
+                if st.session_state.get("telegram_ativo") and st.session_state["live_dados"]:
+                    st.session_state["ids_alertados"] = alertar_arbs(
+                        st.session_state["live_dados"],
+                        valor_invest=valor_inv,
+                        ids_ja_enviados=st.session_state.get("ids_alertados", set()),
+                    )
+            st.rerun()
+        else:
+            time.sleep(1)
+            st.rerun()
+
+    if dados is None:
+        st.info("Clique em **⚡ Buscar Live** na sidebar para iniciar.")
+        return
+
+    if not dados:
+        st.warning("Nenhuma oportunidade ao vivo encontrada. Tente em horários de pico ou aumente a margem máxima.")
+        st.caption("🕐 Pico: Futebol 14h–22h | NBA 21h–04h | Tênis varia")
+        return
+
+    arbs_reais = [d for d in dados if d["eh_arb"]]
+    quentes    = [d for d in dados if not d["eh_arb"] and d["margem_pct"] < 101]
+
+    # ── Métricas ──────────────────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("🔴 Eventos ao vivo", len({d["jogo"] for d in dados}))
+    m2.metric("Oportunidades",      len(dados))
+    m3.metric("🚨 Arbs reais",      len(arbs_reais))
+    m4.metric("🔥 Quentes",         len(quentes))
+
+    if arbs_reais:
+        st.error(f"🚨 {len(arbs_reais)} ARB(S) AO VIVO — Execute imediatamente!")
+
+    st.divider()
+
+    # ── Tabela ────────────────────────────────────────────────────────────
+    rows = []
+    for d in dados:
+        if d["eh_arb"]:              status = "🚨 ARB"
+        elif d["margem_pct"] < 101:  status = "🔥 Quente"
+        elif d["margem_pct"] < 102:  status = "⚡ Próximo"
+        else:                        status = "👀 Monitorar"
+
+        # Montar colunas de odds por lado
+        b365_str   = " / ".join(f"{k}:{v}" for k,v in d.get("odds_b365",{}).items())
+        betano_str = " / ".join(f"{k}:{v}" for k,v in d.get("odds_betano",{}).items())
+
+        rows.append({
+            "Status":      status,
+            "Jogo":        d["jogo"],
+            "Esporte":     d["esporte"],
+            "Mercado":     d["mercado"],
+            "Linha":       d.get("linha",""),
+            "Bet365":      b365_str,
+            "Betano":      betano_str,
+            "Margem (%)":  d["margem_pct"],
+        })
+
+    df = pd.DataFrame(rows)
+
+    def _cor_margem_live(val):
+        if isinstance(val, float):
+            if val < 100: return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
+            if val < 101: return "color:#e74c3c;font-weight:500"
+            if val < 102: return "color:#e67e22;font-weight:500"
+        return ""
+
+    styled = (
+        df.style
+        .map(_cor_margem_live, subset=["Margem (%)"])
+        .format({"Margem (%)": "{:.2f}%"})
+    )
+    st.dataframe(styled, width="stretch", hide_index=True)
+
+    # ── Expanders — arbs e quentes primeiro, expandidos ───────────────────
+    prioritarios = arbs_reais + quentes
+    resto        = [d for d in dados if d not in prioritarios][:max(0, 15-len(prioritarios))]
+    lista_exp    = prioritarios + resto
+
+    st.markdown("### 📌 Como executar")
+    for d in lista_exp:
+        if d["eh_arb"]:              icone, exp = "🚨", True
+        elif d["margem_pct"] < 101:  icone, exp = "🔥", True
+        else:                        icone, exp = "👀", False
+
+        label = f"{icone} {d['jogo']} | {d['mercado']} | Margem: {d['margem_pct']:.2f}%"
+        with st.expander(label, expanded=exp):
+            st.markdown(f"**{d['jogo']}** 🔴 AO VIVO — {d['liga']}")
+            st.markdown(f"Mercado: `{d['mercado']}`" + (f" | Linha: `{d['linha']}`" if d.get('linha') else ""))
+
+            # Legs
+            legs = d.get("legs", [])
+            cols = st.columns(len(legs)) if legs else []
+            for col, leg in zip(cols, legs):
+                with col:
+                    st.markdown(f"**{leg['casa']}**")
+                    if leg.get("link"):
+                        st.markdown(f"[↗ Abrir]({leg['link']})")
+                    st.metric(leg["tipo"], f"{leg['odd']:.3f}")
+
+            st.divider()
+            if d["eh_arb"]:
+                melhores = {leg["tipo"]: leg["odd"] for leg in legs}
+                soma = sum(1/v for v in melhores.values() if v > 1)
+                if soma > 0:
+                    retorno_alvo = valor_inv / soma
+                    st.success(f"✅ ARB AO VIVO — Lucro: R$ {retorno_alvo - valor_inv:.2f} com R$ {valor_inv:.2f}")
+                    for leg in legs:
+                        if leg["odd"] > 1:
+                            stake = round(retorno_alvo / leg["odd"], 2)
+                            st.markdown(f"- **{leg['casa']}** {leg['tipo']} @ {leg['odd']:.3f} → **R$ {stake:.2f}**")
+            else:
+                st.info(f"Margem: {d['margem_pct']:.2f}% — falta {d['margem_pct']-100:.2f}% para arb real.")
+
+
+# ---------------------------------------------------------------------------
+# Layout principal
+# ---------------------------------------------------------------------------
+
 modo = st.radio(
     "Modo",
-    ["⚽ Futebol", "🏀 NBA", "🎾 Tênis", "🔍 Comparação"],
+    ["⚽ Futebol", "🏀 NBA", "🎾 Tênis", "🔍 Comparação", "⚡ Live"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -773,5 +971,7 @@ elif modo == "🏀 NBA":
     _render_nba()
 elif modo == "🎾 Tênis":
     _render_tenis()
-else:
+elif modo == "🔍 Comparação":
     _render_comparacao()
+else:
+    _render_live()
