@@ -1135,22 +1135,22 @@ def buscar_comparacao_odds(
     return resultado
 
 # ---------------------------------------------------------------------------
-# Live Arbitrage — odds ao vivo comparadas entre Bet365 e Betano
+# Live — Detector de Crossing Odds (futebol ao vivo, Bet365)
+# ---------------------------------------------------------------------------
+# Crossing odds = momento em que Casa e Fora se cruzam durante o jogo ao vivo.
+# É o ponto de maior equilíbrio e onde divergências entre casas são maiores.
+# Útil como sinal de timing mesmo com só uma casa disponível.
 # ---------------------------------------------------------------------------
 
-ESPORTES_LIVE: list[str] = ["football", "basketball", "tennis"]
-MAX_EVENTOS_LIVE: int = 20  # por esporte — respeita limite de 100 chamadas/h
-MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals", "Over/Under"]
+ESPORTES_LIVE: list[str] = ["football"]  # só futebol tem odds ao vivo na API atual
+MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals"]
+MAX_EVENTOS_LIVE: int = 20
 
 
 def get_eventos_live(esportes: list[str] | None = None) -> list[dict]:
-    """
-    Retorna todos os eventos com status=live para os esportes selecionados.
-    Custo: 1 chamada por esporte.
-    """
+    """Retorna eventos com status=live. Custo: 1 chamada por esporte."""
     if esportes is None:
         esportes = ESPORTES_LIVE
-
     todos: list[dict] = []
     for esporte in esportes:
         url = f"{BASE_URL}/events?apiKey={API_KEY}&sport={esporte}&status=live"
@@ -1165,56 +1165,11 @@ def get_eventos_live(esportes: list[str] | None = None) -> list[dict]:
     return todos
 
 
-def buscar_live_arb(
-    esportes: list[str] | None = None,
-    mercados: list[str] | None = None,
-    margem_max: float = 5.0,
-) -> list[dict]:
-    """
-    Detecta oportunidades de arbitragem em jogos AO VIVO.
-
-    Pipeline:
-      1. Busca eventos live por esporte
-      2. Busca odds via /odds/multi (Bet365 + Betano)
-      3. Compara lados e calcula margem
-      4. Retorna oportunidades ordenadas por margem crescente
-
-    Custo: 1 chamada por esporte + N/10 chamadas para odds
-           (N = eventos live, lotes de 10)
-    """
-    if esportes is None:
-        esportes = ESPORTES_LIVE
-    if mercados is None:
-        mercados = MERCADOS_LIVE
-
-    mercados_set = set(mercados)
-
-    # 1. Eventos ao vivo
-    eventos = get_eventos_live(esportes)
-    if not eventos:
-        logger.info("live arb: nenhum evento ao vivo no momento")
-        return []
-
-    # Limitar por esporte para não estourar chamadas
-    por_esporte: dict[str, list] = {}
-    for e in eventos:
-        sport_raw = e.get("sport", "")
-        # API pode retornar sport como string ou dict {"name": "Football"}
-        esp = (sport_raw if isinstance(sport_raw, str) else sport_raw.get("name", "")).lower()
-        por_esporte.setdefault(esp, []).append(e)
-
-    selecionados: list[dict] = []
-    for esp, evts in por_esporte.items():
-        selecionados.extend(evts[:MAX_EVENTOS_LIVE])
-
-    logger.info("live arb: %d eventos selecionados", len(selecionados))
-
-    # 2. Odds em lotes de 10
+def _get_odds_live(event_ids: list[int]) -> list[dict]:
+    """Busca odds ao vivo em lotes. Custo: ceil(N/10) chamadas."""
     resultados: list[dict] = []
-    ids = [e["id"] for e in selecionados]
-
-    for i in range(0, len(ids), LOTE_ODDS):
-        lote = ids[i:i + LOTE_ODDS]
+    for i in range(0, len(event_ids[:MAX_EVENTOS_LIVE]), LOTE_ODDS):
+        lote = event_ids[i:i + LOTE_ODDS]
         url = (
             f"{BASE_URL}/odds/multi"
             f"?apiKey={API_KEY}"
@@ -1223,120 +1178,162 @@ def buscar_live_arb(
             f"&includeEventDetails=true"
         )
         try:
-            odds_lista = _get_json(url)
-            if not isinstance(odds_lista, list):
+            data = _get_json(url)
+            if isinstance(data, list):
+                resultados.extend(data)
+        except requests.RequestException as exc:
+            logger.error("odds live lote %d falhou: %s", i, exc)
+    return resultados
+
+
+def buscar_crossing_odds(
+    threshold: float = 0.15,
+    mercados: list[str] | None = None,
+) -> list[dict]:
+    """
+    Detecta crossing odds em jogos de futebol ao vivo.
+
+    threshold: diferença máxima entre odd Casa e odd Fora para considerar
+               que estão cruzando (ex: 0.15 → odds dentro de 0.15 uma da outra)
+
+    Classifica cada jogo em:
+      🎯 Cruzado    — odds já se cruzaram (Fora < Casa)
+      ⚡ Cruzando   — diferença <= threshold (prestes a cruzar)
+      📊 Monitorar  — diferença > threshold mas vale acompanhar
+
+    Custo: 1 chamada (eventos) + ceil(N/10) chamadas (odds)
+    """
+    if mercados is None:
+        mercados = MERCADOS_LIVE
+    mercados_set = set(mercados)
+
+    # 1. Eventos ao vivo de futebol
+    eventos = get_eventos_live(["football"])
+    if not eventos:
+        return []
+
+    event_ids = [e["id"] for e in eventos[:MAX_EVENTOS_LIVE]]
+    odds_lista = _get_odds_live(event_ids)
+
+    resultado: list[dict] = []
+
+    for jogo in odds_lista:
+        home    = jogo.get("home", "?")
+        away    = jogo.get("away", "?")
+        liga    = jogo.get("league", {}).get("name", "")
+        horario = _fmt_horario(jogo.get("date", ""))
+        urls_jogo = jogo.get("urls", {})
+        link = (
+            urls_jogo.get("Bet365", "")
+            .replace("www.bet365.com", "bet365.bet.br")
+            .replace("//bet365.com", "//bet365.bet.br")
+        )
+
+        bookmakers = jogo.get("bookmakers", {})
+
+        for casa_raw, markets in bookmakers.items():
+            casa_base = casa_raw.split(" ")[0]
+            if casa_base not in ("Bet365", "Betano"):
                 continue
 
-            for jogo in odds_lista:
-                home     = jogo.get("home", "?")
-                away     = jogo.get("away", "?")
-                liga     = jogo.get("league", {}).get("name", "")
-                sport_raw = jogo.get("sport", "")
-                esporte   = sport_raw if isinstance(sport_raw, str) else sport_raw.get("name", "")
-                horario  = _fmt_horario(jogo.get("date", ""))
-                urls_jogo = jogo.get("urls", {})
-
-                bookmakers = jogo.get("bookmakers", {})
-                if not bookmakers:
+            for market in markets:
+                mkt_name = market.get("name", "")
+                if mkt_name not in mercados_set:
                     continue
 
-                # Indexar odds por mercado e lado para cada casa
-                odds_por_casa: dict[str, dict[str, dict]] = {}
-                for casa, markets in bookmakers.items():
-                    casa_base = casa.split(" ")[0]
-                    if casa_base not in ("Bet365", "Betano"):
-                        continue
-                    for market in markets:
-                        mkt_name = market.get("name", "")
-                        if mkt_name not in mercados_set:
-                            continue
-                        odds_info = market.get("odds", [{}])
-                        if not odds_info or not isinstance(odds_info[0], dict):
-                            continue
-                        key = mkt_name
-                        odds_por_casa.setdefault(key, {})[casa_base] = odds_info[0]
+                odds_info = market.get("odds", [{}])
+                if not odds_info or not isinstance(odds_info[0], dict):
+                    continue
 
-                # 3. Comparar lados entre casas
-                for mkt_name, casas_odds in odds_por_casa.items():
-                    if len(casas_odds) < 1:
+                entry = odds_info[0]
+
+                # ML — comparar home vs away
+                if mkt_name == "ML":
+                    odd_home = _safe_float(entry.get("home"))
+                    odd_away = _safe_float(entry.get("away"))
+                    odd_draw = _safe_float(entry.get("draw"))
+
+                    if odd_home <= 1 or odd_away <= 1:
                         continue
 
-                    # Pegar odds de cada casa
-                    odds_b365   = casas_odds.get("Bet365", {})
-                    odds_betano = casas_odds.get("Betano", {})
-                    linha = odds_b365.get("hdp") or odds_betano.get("hdp")
+                    diff = abs(odd_home - odd_away)
+                    cruzado   = odd_away < odd_home   # favorito virou
+                    cruzando  = diff <= threshold
+                    prob_home = round(1/odd_home * 100, 1)
+                    prob_away = round(1/odd_away * 100, 1)
 
-                    # Lados disponíveis
-                    lados_b365   = {k: _safe_float(v) for k, v in odds_b365.items()
-                                    if k not in ("hdp","max","label") and _safe_float(v) > 1}
-                    lados_betano = {k: _safe_float(v) for k, v in odds_betano.items()
-                                    if k not in ("hdp","max","label") and _safe_float(v) > 1}
+                    if cruzado:
+                        status = "🎯 Cruzado"
+                        urgencia = 0
+                    elif cruzando:
+                        status = "⚡ Cruzando"
+                        urgencia = 1
+                    else:
+                        status = "📊 Monitorar"
+                        urgencia = 2
 
-                    todos_lados = set(lados_b365) | set(lados_betano)
-                    if len(todos_lados) < 2:
-                        continue
-
-                    # Melhor odd por lado entre as casas
-                    melhores: dict[str, float] = {}
-                    casa_melhor: dict[str, str] = {}
-                    for lado in todos_lados:
-                        ob = lados_b365.get(lado, 0)
-                        on = lados_betano.get(lado, 0)
-                        if ob > on:
-                            melhores[lado] = ob
-                            casa_melhor[lado] = "Bet365"
-                        elif on > 0:
-                            melhores[lado] = on
-                            casa_melhor[lado] = "Betano"
-                        else:
-                            melhores[lado] = ob
-                            casa_melhor[lado] = "Bet365"
-
-                    # Margem com melhores odds
-                    soma_probs = sum(1/v for v in melhores.values() if v > 1)
-                    margem = round(soma_probs * 100, 2)
-
-                    if margem > (100 + margem_max):
-                        continue
-
-                    # Montar legs
-                    legs = []
-                    for lado, odd in melhores.items():
-                        casa = casa_melhor[lado]
-                        link = ""
-                        if casa == "Bet365":
-                            link = (urls_jogo.get("Bet365","")
-                                    .replace("www.bet365.com","bet365.bet.br")
-                                    .replace("//bet365.com","//bet365.bet.br"))
-                        tipo_desc = _resolver_tipo(mkt_name, lado, linha, None)
-                        legs.append({
-                            "lado":  lado,
-                            "tipo":  tipo_desc,
-                            "casa":  casa,
-                            "odd":   odd,
-                            "link":  link,
-                        })
-
-                    resultados.append({
-                        "jogo":      f"{home} x {away}",
-                        "esporte":   esporte,
-                        "liga":      liga,
-                        "horario":   horario,
-                        "status":    "🔴 AO VIVO",
-                        "mercado":   mkt_name,
-                        "linha":     linha,
-                        "margem_pct": margem,
-                        "eh_arb":    margem < 100.0,
-                        "legs":      legs,
-                        # Odds detalhadas por casa
-                        "odds_b365":   {k: round(v,3) for k,v in lados_b365.items()},
-                        "odds_betano": {k: round(v,3) for k,v in lados_betano.items()},
+                    resultado.append({
+                        "jogo":       f"{home} x {away}",
+                        "liga":       liga,
+                        "horario":    horario,
+                        "casa":       casa_base,
+                        "mercado":    mkt_name,
+                        "odd_home":   round(odd_home, 3),
+                        "odd_away":   round(odd_away, 3),
+                        "odd_draw":   round(odd_draw, 3) if odd_draw > 1 else None,
+                        "diff":       round(diff, 3),
+                        "prob_home":  prob_home,
+                        "prob_away":  prob_away,
+                        "cruzado":    cruzado,
+                        "cruzando":   cruzando,
+                        "status":     status,
+                        "urgencia":   urgencia,
+                        "link":       link,
+                        # Sinal de entrada recomendado
+                        "apostar_em": away if cruzado else (
+                            "Fora (tendência)" if odd_away > odd_home else "Casa (tendência)"
+                        ),
                     })
 
-        except requests.RequestException as exc:
-            logger.error("live arb odds lote %d falhou: %s", i, exc)
-            continue
+                # Totals — comparar OVER vs UNDER
+                elif mkt_name == "Totals":
+                    over  = _safe_float(entry.get("over") or entry.get("home"))
+                    under = _safe_float(entry.get("under") or entry.get("away"))
+                    hdp   = entry.get("hdp")
 
-    resultados.sort(key=lambda x: x["margem_pct"])
-    logger.info("live arb: %d oportunidades (margem <= %.1f%%)", len(resultados), margem_max)
-    return resultados
+                    if over <= 1 or under <= 1:
+                        continue
+
+                    diff     = abs(over - under)
+                    cruzado  = under < over
+                    cruzando = diff <= threshold
+
+                    if cruzado:     status, urgencia = "🎯 Cruzado", 0
+                    elif cruzando:  status, urgencia = "⚡ Cruzando", 1
+                    else:           status, urgencia = "📊 Monitorar", 2
+
+                    resultado.append({
+                        "jogo":      f"{home} x {away}",
+                        "liga":      liga,
+                        "horario":   horario,
+                        "casa":      casa_base,
+                        "mercado":   f"Totals ({hdp})" if hdp else "Totals",
+                        "odd_home":  round(over, 3),
+                        "odd_away":  round(under, 3),
+                        "odd_draw":  None,
+                        "diff":      round(diff, 3),
+                        "prob_home": round(1/over * 100, 1),
+                        "prob_away": round(1/under * 100, 1),
+                        "cruzado":   cruzado,
+                        "cruzando":  cruzando,
+                        "status":    status,
+                        "urgencia":  urgencia,
+                        "link":      link,
+                        "apostar_em": f"Menos de {hdp}" if cruzado else f"Mais de {hdp}",
+                    })
+
+    # Ordenar: cruzados primeiro, depois cruzando, depois monitorar
+    # Dentro de cada grupo, menor diferença primeiro
+    resultado.sort(key=lambda x: (x["urgencia"], x["diff"]))
+    logger.info("crossing odds: %d sinais encontrados", len(resultado))
+    return resultado
