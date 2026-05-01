@@ -4,7 +4,8 @@ import time
 from datetime import datetime, timezone
 from main_engine import (
     buscar_comparacao_odds,
-    buscar_live_arb,
+    buscar_crossing_odds,
+    get_eventos_live,
     rodar_sistema,
     montar_multipla,
     get_arbitrage,
@@ -171,22 +172,19 @@ with st.sidebar:
     buscar_comp = st.button("🔍 Comparar Odds", use_container_width=True)
 
     st.divider()
-    st.markdown("**⚡ Live Arbitrage**")
-    esp_live = st.multiselect(
-        "Esportes live",
-        ["football", "basketball", "tennis"],
-        default=["football", "basketball", "tennis"],
-        label_visibility="collapsed",
-    )
+    st.markdown("**⚡ Live — Crossing Odds**")
+    st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Spread", "Totals", "Over/Under"],
-        default=["ML", "Spread", "Totals"],
+        ["ML", "Totals"],
+        default=["ML", "Totals"],
         label_visibility="collapsed",
     )
-    margem_live = st.slider(
-        "Margem máx. live (%)", 0.5, 10.0, 3.0, 0.5,
-        help="Menor = mais perto de arb real ao vivo.",
+    threshold_live = st.slider(
+        "Threshold de cruzamento",
+        min_value=0.05, max_value=0.50, value=0.15, step=0.05,
+        help="Diferença máxima entre as odds para considerar que estão cruzando. "
+             "Ex: 0.15 → alerta quando Casa e Fora estão a menos de 0.15 uma da outra.",
     )
     auto_refresh_live = st.toggle(
         "🔄 Auto-refresh live",
@@ -266,22 +264,14 @@ if buscar_comp:
             )
 
 if buscar_live:
-    with st.spinner("Buscando live arb..."):
-        st.session_state["live_dados"] = buscar_live_arb(
-            esportes=esp_live or ["football","basketball","tennis"],
-            mercados=mkt_live or ["ML","Spread","Totals"],
-            margem_max=margem_live,
+    with st.spinner("Buscando crossing odds ao vivo..."):
+        st.session_state["live_dados"] = buscar_crossing_odds(
+            threshold=threshold_live,
+            mercados=mkt_live or ["ML","Totals"],
         )
-        st.session_state["live_ts"]  = time.time()
-        st.session_state["esp_live_cache"] = esp_live
-        st.session_state["mkt_live_cache"] = mkt_live
-        st.session_state["margem_live_cache"] = margem_live
-        if st.session_state.get("telegram_ativo") and st.session_state["live_dados"]:
-            st.session_state["ids_alertados"] = alertar_arbs(
-                st.session_state["live_dados"],
-                valor_invest=st.session_state.get("valor_invest", 100.0),
-                ids_ja_enviados=st.session_state.get("ids_alertados", set()),
-            )
+        st.session_state["live_ts"]       = time.time()
+        st.session_state["mkt_live_cache"]      = mkt_live
+        st.session_state["threshold_live_cache"] = threshold_live
 
 banca_ref = st.session_state["banca"]
 qtd_ref   = st.session_state["qtd"]
@@ -814,11 +804,10 @@ def _render_comparacao():
 # ---------------------------------------------------------------------------
 
 def _render_live():
-    dados    = st.session_state.get("live_dados")
-    live_ts  = st.session_state.get("live_ts", 0.0)
-    auto_ref = st.session_state.get("auto_refresh_live", False)
+    dados     = st.session_state.get("live_dados")
+    live_ts   = st.session_state.get("live_ts", 0.0)
+    auto_ref  = st.session_state.get("auto_refresh_live", False)
     intervalo = st.session_state.get("intervalo_live", 1)
-    valor_inv = st.session_state.get("valor_invest", 100.0)
 
     # ── Auto-refresh ──────────────────────────────────────────────────────
     if auto_ref and live_ts > 0:
@@ -827,22 +816,15 @@ def _render_live():
         restante = max(0, int(segundos - elapsed))
         cr1, cr2 = st.columns([3, 1])
         cr1.caption(f"🔄 Atualização em {restante}s (intervalo: {intervalo} min)")
-        if cr2.button("Atualizar agora", key="live_refresh_now"):
+        if cr2.button("Agora", key="live_refresh_now"):
             elapsed = segundos
         if elapsed >= segundos:
-            with st.spinner("Atualizando live..."):
-                st.session_state["live_dados"] = buscar_live_arb(
-                    esportes=st.session_state.get("esp_live_cache", ["football","basketball","tennis"]),
-                    mercados=st.session_state.get("mkt_live_cache", ["ML","Spread","Totals"]),
-                    margem_max=st.session_state.get("margem_live_cache", 3.0),
+            with st.spinner("Atualizando crossing odds..."):
+                st.session_state["live_dados"] = buscar_crossing_odds(
+                    threshold=st.session_state.get("threshold_live_cache", 0.15),
+                    mercados=st.session_state.get("mkt_live_cache", ["ML","Totals"]),
                 )
                 st.session_state["live_ts"] = time.time()
-                if st.session_state.get("telegram_ativo") and st.session_state["live_dados"]:
-                    st.session_state["ids_alertados"] = alertar_arbs(
-                        st.session_state["live_dados"],
-                        valor_invest=valor_inv,
-                        ids_ja_enviados=st.session_state.get("ids_alertados", set()),
-                    )
             st.rerun()
         else:
             time.sleep(1)
@@ -850,106 +832,136 @@ def _render_live():
 
     if dados is None:
         st.info("Clique em **⚡ Buscar Live** na sidebar para iniciar.")
+        st.caption(
+            "O detector monitora jogos de futebol ao vivo e alerta quando as odds de "
+            "Casa e Fora se cruzam — o momento de maior equilíbrio e maior chance de divergência."
+        )
         return
 
     if not dados:
-        st.warning("Nenhuma oportunidade ao vivo encontrada. Tente em horários de pico ou aumente a margem máxima.")
-        st.caption("🕐 Pico: Futebol 14h–22h | NBA 21h–04h | Tênis varia")
+        st.warning("Nenhum sinal de crossing odds no momento.")
+        st.caption("🕐 Horários de pico: 14h–22h (fins de semana têm mais jogos)")
         return
 
-    arbs_reais = [d for d in dados if d["eh_arb"]]
-    quentes    = [d for d in dados if not d["eh_arb"] and d["margem_pct"] < 101]
+    cruzados  = [d for d in dados if d["cruzado"]]
+    cruzando  = [d for d in dados if d["cruzando"] and not d["cruzado"]]
+    monitorar = [d for d in dados if not d["cruzado"] and not d["cruzando"]]
 
     # ── Métricas ──────────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("🔴 Eventos ao vivo", len({d["jogo"] for d in dados}))
-    m2.metric("Oportunidades",      len(dados))
-    m3.metric("🚨 Arbs reais",      len(arbs_reais))
-    m4.metric("🔥 Quentes",         len(quentes))
+    m1.metric("🔴 Jogos ao vivo",  len({d["jogo"] for d in dados}))
+    m2.metric("🎯 Já cruzaram",    len(cruzados))
+    m3.metric("⚡ Cruzando agora", len(cruzando))
+    m4.metric("📊 Monitorar",      len(monitorar))
 
-    if arbs_reais:
-        st.error(f"🚨 {len(arbs_reais)} ARB(S) AO VIVO — Execute imediatamente!")
+    if cruzados:
+        st.error(f"🎯 {len(cruzados)} odd(s) já cruzaram — verifique o sinal de entrada!")
+    if cruzando:
+        st.warning(f"⚡ {len(cruzando)} odd(s) prestes a cruzar — fique de olho!")
 
     st.divider()
+
+    # ── Explicação rápida ─────────────────────────────────────────────────
+    with st.expander("ℹ️ O que são Crossing Odds?", expanded=False):
+        st.markdown("""
+**Crossing Odds** é quando as odds de Casa e Fora se invertem durante o jogo.
+
+**Exemplo:**
+- Início: Casa @ 1.80 / Fora @ 2.20 *(Casa favorita)*
+- Durante o jogo: Casa @ 2.05 / Fora @ 2.05 ← **cruzamento**
+- Depois: Casa @ 2.40 / Fora @ 1.75 *(Fora virou favorita)*
+
+**Por que importa?**
+- No ponto de cruzamento as odds ficam mais equilibradas
+- Casas diferentes ajustam em momentos diferentes → janela de divergência
+- É o melhor momento para identificar value bet ou arb entre casas
+
+**Status:**
+- 🎯 **Cruzado** — as odds já se inverteram (Fora < Casa)
+- ⚡ **Cruzando** — diferença menor que o threshold configurado
+- 📊 **Monitorar** — ainda longe do cruzamento mas vale acompanhar
+        """)
 
     # ── Tabela ────────────────────────────────────────────────────────────
     rows = []
     for d in dados:
-        if d["eh_arb"]:              status = "🚨 ARB"
-        elif d["margem_pct"] < 101:  status = "🔥 Quente"
-        elif d["margem_pct"] < 102:  status = "⚡ Próximo"
-        else:                        status = "👀 Monitorar"
-
-        # Montar colunas de odds por lado
-        b365_str   = " / ".join(f"{k}:{v}" for k,v in d.get("odds_b365",{}).items())
-        betano_str = " / ".join(f"{k}:{v}" for k,v in d.get("odds_betano",{}).items())
-
         rows.append({
-            "Status":      status,
-            "Jogo":        d["jogo"],
-            "Esporte":     d["esporte"],
-            "Mercado":     d["mercado"],
-            "Linha":       d.get("linha",""),
-            "Bet365":      b365_str,
-            "Betano":      betano_str,
-            "Margem (%)":  d["margem_pct"],
+            "Status":     d["status"],
+            "Jogo":       d["jogo"],
+            "Liga":       d["liga"],
+            "Mercado":    d["mercado"],
+            "Casa Odd":   d["odd_home"],
+            "Fora Odd":   d["odd_away"],
+            "Diferença":  d["diff"],
+            "Prob Casa":  f"{d['prob_home']}%",
+            "Prob Fora":  f"{d['prob_away']}%",
+            "Sinal":      d["apostar_em"],
         })
 
     df = pd.DataFrame(rows)
 
-    def _cor_margem_live(val):
+    def _cor_status(val):
+        if "Cruzado"  in str(val): return "color:#2ecc71;font-weight:bold"
+        if "Cruzando" in str(val): return "color:#e67e22;font-weight:500"
+        return ""
+
+    def _cor_diff(val):
         if isinstance(val, float):
-            if val < 100: return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
-            if val < 101: return "color:#e74c3c;font-weight:500"
-            if val < 102: return "color:#e67e22;font-weight:500"
+            if val < 0.05: return "color:#2ecc71;font-weight:bold"
+            if val < 0.15: return "color:#e67e22"
         return ""
 
     styled = (
         df.style
-        .map(_cor_margem_live, subset=["Margem (%)"])
-        .format({"Margem (%)": "{:.2f}%"})
+        .map(_cor_status, subset=["Status"])
+        .map(_cor_diff,   subset=["Diferença"])
+        .format({"Casa Odd": "{:.3f}", "Fora Odd": "{:.3f}", "Diferença": "{:.3f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
 
-    # ── Expanders — arbs e quentes primeiro, expandidos ───────────────────
-    prioritarios = arbs_reais + quentes
-    resto        = [d for d in dados if d not in prioritarios][:max(0, 15-len(prioritarios))]
+    # ── Expanders detalhados ──────────────────────────────────────────────
+    prioritarios = cruzados + cruzando
+    resto        = monitorar[:max(0, 10 - len(prioritarios))]
     lista_exp    = prioritarios + resto
 
-    st.markdown("### 📌 Como executar")
+    st.markdown("### 📌 Detalhes e sinal de entrada")
     for d in lista_exp:
-        if d["eh_arb"]:              icone, exp = "🚨", True
-        elif d["margem_pct"] < 101:  icone, exp = "🔥", True
-        else:                        icone, exp = "👀", False
+        exp   = d["cruzado"] or d["cruzando"]
+        label = f"{d['status']} {d['jogo']} | {d['mercado']} | Diff: {d['diff']:.3f}"
 
-        label = f"{icone} {d['jogo']} | {d['mercado']} | Margem: {d['margem_pct']:.2f}%"
         with st.expander(label, expanded=exp):
-            st.markdown(f"**{d['jogo']}** 🔴 AO VIVO — {d['liga']}")
-            st.markdown(f"Mercado: `{d['mercado']}`" + (f" | Linha: `{d['linha']}`" if d.get('linha') else ""))
+            st.markdown(f"**{d['jogo']}** 🔴 AO VIVO")
+            st.markdown(f"🏆 {d['liga']}")
 
-            # Legs
-            legs = d.get("legs", [])
-            cols = st.columns(len(legs)) if legs else []
-            for col, leg in zip(cols, legs):
-                with col:
-                    st.markdown(f"**{leg['casa']}**")
-                    if leg.get("link"):
-                        st.markdown(f"[↗ Abrir]({leg['link']})")
-                    st.metric(leg["tipo"], f"{leg['odd']:.3f}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Casa (Home)", f"{d['odd_home']:.3f}", f"{d['prob_home']}%")
+            c2.metric("Fora (Away)", f"{d['odd_away']:.3f}", f"{d['prob_away']}%")
+            c3.metric("Diferença",   f"{d['diff']:.3f}",
+                      "✅ Cruzado" if d["cruzado"] else ("⚡ Cruzando" if d["cruzando"] else ""))
+
+            if d.get("odd_draw"):
+                st.caption(f"Empate: {d['odd_draw']:.3f}")
 
             st.divider()
-            if d["eh_arb"]:
-                melhores = {leg["tipo"]: leg["odd"] for leg in legs}
-                soma = sum(1/v for v in melhores.values() if v > 1)
-                if soma > 0:
-                    retorno_alvo = valor_inv / soma
-                    st.success(f"✅ ARB AO VIVO — Lucro: R$ {retorno_alvo - valor_inv:.2f} com R$ {valor_inv:.2f}")
-                    for leg in legs:
-                        if leg["odd"] > 1:
-                            stake = round(retorno_alvo / leg["odd"], 2)
-                            st.markdown(f"- **{leg['casa']}** {leg['tipo']} @ {leg['odd']:.3f} → **R$ {stake:.2f}**")
+
+            if d["cruzado"]:
+                st.success(
+                    f"🎯 Odds já cruzaram! Sinal: {d['apostar_em']}. "
+                    f"Fora ({d['odd_away']:.3f}) < Casa ({d['odd_home']:.3f}) — visitante virou favorito."
+                )
+            elif d["cruzando"]:
+                st.warning(
+                    f"⚡ Prestes a cruzar — diferença de {d['diff']:.3f}. "
+                    f"Tendência: {d['apostar_em']}. Monitore de perto."
+                )
             else:
-                st.info(f"Margem: {d['margem_pct']:.2f}% — falta {d['margem_pct']-100:.2f}% para arb real.")
+                st.info(
+                    f"📊 Monitorando — diferença atual: {d['diff']:.3f}. "
+                    "Ainda longe do cruzamento. Use o auto-refresh para acompanhar."
+                )
+
+            if d.get("link"):
+                st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
 
 # ---------------------------------------------------------------------------
