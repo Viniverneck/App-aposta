@@ -1133,3 +1133,207 @@ def buscar_comparacao_odds(
     resultado.sort(key=lambda x: (x["horario"], x["margem_pct"]))
     logger.info("Comparação: %d linhas com margem <= %.1f%%", len(resultado), margem_max)
     return resultado
+
+# ---------------------------------------------------------------------------
+# Live Arbitrage — odds ao vivo comparadas entre Bet365 e Betano
+# ---------------------------------------------------------------------------
+
+ESPORTES_LIVE: list[str] = ["football", "basketball", "tennis"]
+MAX_EVENTOS_LIVE: int = 20  # por esporte — respeita limite de 100 chamadas/h
+MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals", "Over/Under"]
+
+
+def get_eventos_live(esportes: list[str] | None = None) -> list[dict]:
+    """
+    Retorna todos os eventos com status=live para os esportes selecionados.
+    Custo: 1 chamada por esporte.
+    """
+    if esportes is None:
+        esportes = ESPORTES_LIVE
+
+    todos: list[dict] = []
+    for esporte in esportes:
+        url = f"{BASE_URL}/events?apiKey={API_KEY}&sport={esporte}&status=live"
+        try:
+            data = _get_json(url)
+            if isinstance(data, list):
+                todos.extend(data)
+                logger.info("live eventos (%s): %d", esporte, len(data))
+        except requests.RequestException as exc:
+            logger.error("get_eventos_live (%s) falhou: %s", esporte, exc)
+    logger.info("live eventos total: %d", len(todos))
+    return todos
+
+
+def buscar_live_arb(
+    esportes: list[str] | None = None,
+    mercados: list[str] | None = None,
+    margem_max: float = 5.0,
+) -> list[dict]:
+    """
+    Detecta oportunidades de arbitragem em jogos AO VIVO.
+
+    Pipeline:
+      1. Busca eventos live por esporte
+      2. Busca odds via /odds/multi (Bet365 + Betano)
+      3. Compara lados e calcula margem
+      4. Retorna oportunidades ordenadas por margem crescente
+
+    Custo: 1 chamada por esporte + N/10 chamadas para odds
+           (N = eventos live, lotes de 10)
+    """
+    if esportes is None:
+        esportes = ESPORTES_LIVE
+    if mercados is None:
+        mercados = MERCADOS_LIVE
+
+    mercados_set = set(mercados)
+
+    # 1. Eventos ao vivo
+    eventos = get_eventos_live(esportes)
+    if not eventos:
+        logger.info("live arb: nenhum evento ao vivo no momento")
+        return []
+
+    # Limitar por esporte para não estourar chamadas
+    por_esporte: dict[str, list] = {}
+    for e in eventos:
+        esp = e.get("sport", "").lower()
+        por_esporte.setdefault(esp, []).append(e)
+
+    selecionados: list[dict] = []
+    for esp, evts in por_esporte.items():
+        selecionados.extend(evts[:MAX_EVENTOS_LIVE])
+
+    logger.info("live arb: %d eventos selecionados", len(selecionados))
+
+    # 2. Odds em lotes de 10
+    resultados: list[dict] = []
+    ids = [e["id"] for e in selecionados]
+
+    for i in range(0, len(ids), LOTE_ODDS):
+        lote = ids[i:i + LOTE_ODDS]
+        url = (
+            f"{BASE_URL}/odds/multi"
+            f"?apiKey={API_KEY}"
+            f"&eventIds={','.join(map(str, lote))}"
+            f"&bookmakers={BOOKMAKERS}"
+            f"&includeEventDetails=true"
+        )
+        try:
+            odds_lista = _get_json(url)
+            if not isinstance(odds_lista, list):
+                continue
+
+            for jogo in odds_lista:
+                home     = jogo.get("home", "?")
+                away     = jogo.get("away", "?")
+                liga     = jogo.get("league", {}).get("name", "")
+                esporte  = jogo.get("sport", "")
+                horario  = _fmt_horario(jogo.get("date", ""))
+                urls_jogo = jogo.get("urls", {})
+
+                bookmakers = jogo.get("bookmakers", {})
+                if not bookmakers:
+                    continue
+
+                # Indexar odds por mercado e lado para cada casa
+                odds_por_casa: dict[str, dict[str, dict]] = {}
+                for casa, markets in bookmakers.items():
+                    casa_base = casa.split(" ")[0]
+                    if casa_base not in ("Bet365", "Betano"):
+                        continue
+                    for market in markets:
+                        mkt_name = market.get("name", "")
+                        if mkt_name not in mercados_set:
+                            continue
+                        odds_info = market.get("odds", [{}])
+                        if not odds_info or not isinstance(odds_info[0], dict):
+                            continue
+                        key = mkt_name
+                        odds_por_casa.setdefault(key, {})[casa_base] = odds_info[0]
+
+                # 3. Comparar lados entre casas
+                for mkt_name, casas_odds in odds_por_casa.items():
+                    if len(casas_odds) < 1:
+                        continue
+
+                    # Pegar odds de cada casa
+                    odds_b365   = casas_odds.get("Bet365", {})
+                    odds_betano = casas_odds.get("Betano", {})
+                    linha = odds_b365.get("hdp") or odds_betano.get("hdp")
+
+                    # Lados disponíveis
+                    lados_b365   = {k: _safe_float(v) for k, v in odds_b365.items()
+                                    if k not in ("hdp","max","label") and _safe_float(v) > 1}
+                    lados_betano = {k: _safe_float(v) for k, v in odds_betano.items()
+                                    if k not in ("hdp","max","label") and _safe_float(v) > 1}
+
+                    todos_lados = set(lados_b365) | set(lados_betano)
+                    if len(todos_lados) < 2:
+                        continue
+
+                    # Melhor odd por lado entre as casas
+                    melhores: dict[str, float] = {}
+                    casa_melhor: dict[str, str] = {}
+                    for lado in todos_lados:
+                        ob = lados_b365.get(lado, 0)
+                        on = lados_betano.get(lado, 0)
+                        if ob > on:
+                            melhores[lado] = ob
+                            casa_melhor[lado] = "Bet365"
+                        elif on > 0:
+                            melhores[lado] = on
+                            casa_melhor[lado] = "Betano"
+                        else:
+                            melhores[lado] = ob
+                            casa_melhor[lado] = "Bet365"
+
+                    # Margem com melhores odds
+                    soma_probs = sum(1/v for v in melhores.values() if v > 1)
+                    margem = round(soma_probs * 100, 2)
+
+                    if margem > (100 + margem_max):
+                        continue
+
+                    # Montar legs
+                    legs = []
+                    for lado, odd in melhores.items():
+                        casa = casa_melhor[lado]
+                        link = ""
+                        if casa == "Bet365":
+                            link = (urls_jogo.get("Bet365","")
+                                    .replace("www.bet365.com","bet365.bet.br")
+                                    .replace("//bet365.com","//bet365.bet.br"))
+                        tipo_desc = _resolver_tipo(mkt_name, lado, linha, None)
+                        legs.append({
+                            "lado":  lado,
+                            "tipo":  tipo_desc,
+                            "casa":  casa,
+                            "odd":   odd,
+                            "link":  link,
+                        })
+
+                    resultados.append({
+                        "jogo":      f"{home} x {away}",
+                        "esporte":   esporte,
+                        "liga":      liga,
+                        "horario":   horario,
+                        "status":    "🔴 AO VIVO",
+                        "mercado":   mkt_name,
+                        "linha":     linha,
+                        "margem_pct": margem,
+                        "eh_arb":    margem < 100.0,
+                        "legs":      legs,
+                        # Odds detalhadas por casa
+                        "odds_b365":   {k: round(v,3) for k,v in lados_b365.items()},
+                        "odds_betano": {k: round(v,3) for k,v in lados_betano.items()},
+                    })
+
+        except requests.RequestException as exc:
+            logger.error("live arb odds lote %d falhou: %s", i, exc)
+            continue
+
+    resultados.sort(key=lambda x: x["margem_pct"])
+    logger.info("live arb: %d oportunidades (margem <= %.1f%%)", len(resultados), margem_max)
+    return resultados
