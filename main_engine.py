@@ -1198,7 +1198,9 @@ def buscar_live_arb(
     # Limitar por esporte para não estourar chamadas
     por_esporte: dict[str, list] = {}
     for e in eventos:
-        esp = e.get("sport", "").lower()
+        sport_raw = e.get("sport", "")
+        # API pode retornar sport como string ou dict {"name": "Football"}
+        esp = (sport_raw if isinstance(sport_raw, str) else sport_raw.get("name", "")).lower()
         por_esporte.setdefault(esp, []).append(e)
 
     selecionados: list[dict] = []
@@ -1229,7 +1231,8 @@ def buscar_live_arb(
                 home     = jogo.get("home", "?")
                 away     = jogo.get("away", "?")
                 liga     = jogo.get("league", {}).get("name", "")
-                esporte  = jogo.get("sport", "")
+                sport_raw = jogo.get("sport", "")
+                esporte   = sport_raw if isinstance(sport_raw, str) else sport_raw.get("name", "")
                 horario  = _fmt_horario(jogo.get("date", ""))
                 urls_jogo = jogo.get("urls", {})
 
