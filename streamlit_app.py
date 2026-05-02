@@ -101,8 +101,12 @@ with st.sidebar:
 
     st.caption("🏀 Mercados NBA")
     sel_nba = st.multiselect("NBA", MERCADOS_NBA,
-                              default=["ML","Spread","Totals",
-                                       "Points O/U","Rebounds O/U","Assists O/U"],
+                              default=[
+                                  "Points O/U","Rebounds O/U","Assists O/U",
+                                  "Double Double",
+                                  "Player Points Milestones","Player Rebounds Milestones",
+                                  "Player Assists Milestones","Player Threes Milestones",
+                              ],
                               label_visibility="collapsed")
 
     st.caption("🎾 Mercados Tênis")
@@ -976,95 +980,71 @@ def _render_live():
 
     # ── Expanders detalhados ──────────────────────────────────────────────
     prioritarios = cruzados + cruzando
-    resto        = monitorar[:max(0, 10 - len(prioritarios))]
-    lista_exp    = prioritarios + resto
-
-    st.markdown("### 📌 Detalhes e sinal de entrada")
-    for d in lista_exp:
-        exp   = d["cruzado"] or d["cruzando"]
-        label = f"{d['status']} {d['jogo']} | {d['mercado']} | Diff: {d['diff']:.3f}"
-
-        with st.expander(label, expanded=exp):
-            st.markdown(f"**{d['jogo']}** 🔴 AO VIVO")
-            st.markdown(f"🏆 {d['liga']}")
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Casa (Home)", f"{d['odd_home']:.3f}", f"{d['prob_home']}%")
-            c2.metric("Fora (Away)", f"{d['odd_away']:.3f}", f"{d['prob_away']}%")
-            c3.metric("Diferença",   f"{d['diff']:.3f}",
-                      "✅ Cruzado" if d["cruzado"] else ("⚡ Cruzando" if d["cruzando"] else ""))
-
-            if d.get("odd_draw"):
-                st.caption(f"Empate: {d['odd_draw']:.3f}")
-
-            st.divider()
-
-            if d["cruzado"]:
-                st.success(
-                    f"🎯 Odds já cruzaram! Sinal: {d['apostar_em']}. "
-                    f"Fora ({d['odd_away']:.3f}) < Casa ({d['odd_home']:.3f}) — visitante virou favorito."
-                )
-            elif d["cruzando"]:
-                st.warning(
-                    f"⚡ Prestes a cruzar — diferença de {d['diff']:.3f}. "
-                    f"Tendência: {d['apostar_em']}. Monitore de perto."
-                )
-            else:
-                st.info(
-                    f"📊 Monitorando — diferença atual: {d['diff']:.3f}. "
-                    "Ainda longe do cruzamento. Use o auto-refresh para acompanhar."
-                )
-
-            if d.get("link"):
-                st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
-
-    # ── Calculadora Automática de Cruzamento ────────────────────────────────
+    # ── Calculadora Automática — todos os jogos ─────────────────────────────
     st.divider()
     st.markdown("### 🧮 Calculadora de Cruzamento")
     st.caption(
-        "Mostra automaticamente as odds dos jogos ao vivo com odds acima do threshold "
-        "configurado, com cálculo de arb e distribuição de stakes em tempo real."
+        "Odds cruzando em 2.00 = lucro zero. "
+        "Use o filtro abaixo para monitorar só cruzamentos rentáveis."
     )
 
-    # Filtro de odd mínima para exibir na calculadora
-    cl1, cl2 = st.columns([2, 1])
-    odd_min_calc = cl1.slider(
-        "Odd mínima para exibir", min_value=1.50, max_value=5.00,
-        value=2.60, step=0.05,
-        help="Mostra só jogos onde AMBAS as odds estão acima desse valor — região de cruzamento.",
-        key="odd_min_calc_slider",
+    cv1, cv2 = st.columns([2, 1])
+    odd_min_cruzamento = cv1.slider(
+        "🎯 Odd mínima do cruzamento",
+        min_value=1.80, max_value=4.00, value=2.40, step=0.05,
+        help=(
+            "Mostra só jogos onde AMBAS as odds estão acima deste valor.\n"
+            "2.40 = lucro ~16% | 2.70 = lucro ~26% | 3.00 = lucro ~33%"
+        ),
+        key="odd_min_cruzamento_slider",
     )
-    val_calc = cl2.number_input(
-        "Valor investido (R$)", min_value=10.0, max_value=100_000.0,
+    val_calc = cv2.number_input(
+        "💰 Valor investido (R$)",
+        min_value=10.0, max_value=100_000.0,
         value=float(st.session_state.get("valor_invest", 100.0)),
         step=10.0, key="calc_valor_auto",
+        help="Altere e todas as stakes recalculam automaticamente.",
     )
+    st.session_state["valor_invest"] = val_calc
 
-    # Filtrar dados: ambas as odds acima do threshold
-    dados_calc = [
-        d for d in (dados or [])
-        if d["odd_home"] >= odd_min_calc and d["odd_away"] >= odd_min_calc
-    ] if dados else []
+    if not dados:
+        st.info("Clique em **⚡ Buscar Live** para carregar os jogos ao vivo.")
+    else:
+        # Filtrar: ambas as odds acima do threshold de cruzamento
+        dados_filtrados = [
+            d for d in dados
+            if d["odd_home"] >= odd_min_cruzamento and d["odd_away"] >= odd_min_cruzamento
+        ]
 
-    if not dados_calc:
-        if dados:
+        if not dados_filtrados:
+            lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
             st.info(
-                f"Nenhum jogo com ambas as odds ≥ {odd_min_calc:.2f}. "
-                f"Reduza o threshold ou aguarde as odds se moverem."
+                f"Nenhum jogo com ambas as odds ≥ {odd_min_cruzamento:.2f} no momento. "
+                f"(Cruzamento nessa faixa renderia ~{lucro_est}% de lucro) "
+                "Reduza o threshold ou aguarde as odds se moverem."
             )
         else:
-            st.info("Clique em **⚡ Buscar Live** para carregar os jogos ao vivo.")
-    else:
-        st.caption(f"{len(dados_calc)} jogo(s) com odds ≥ {odd_min_calc:.2f}")
+            lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
+            st.caption(
+                f"{len(dados_filtrados)} jogo(s) com odds ≥ {odd_min_cruzamento:.2f} "
+                f"— cruzamento nessa faixa rende ~{lucro_est}% de lucro"
+            )
 
-        for d in dados_calc:
+        # Ordenar: cruzados primeiro, depois cruzando, depois monitorar
+        ordem = {"🎯 Cruzado": 0, "⚡ Cruzando": 1, "📊 Monitorar": 2}
+        dados_ord = sorted(
+            dados_filtrados if dados_filtrados else dados,
+            key=lambda d: (ordem.get(d["status"], 3), d["diff"])
+        )
+
+        for d in dados_ord:
             odd_h = d["odd_home"]
             odd_a = d["odd_away"]
 
-            soma_p   = (1/odd_h) + (1/odd_a)
-            margem_c = round((soma_p - 1) * 100, 2)
-            eh_arb_c = soma_p < 1.0
-            diff_c   = round(abs(odd_h - odd_a), 3)
+            soma_p    = (1/odd_h) + (1/odd_a)
+            margem_c  = round((soma_p - 1) * 100, 2)
+            eh_arb_c  = soma_p < 1.0
+            diff_c    = round(abs(odd_h - odd_a), 3)
 
             # Stakes ótimas
             retorno_alvo = val_calc / soma_p
@@ -1072,44 +1052,44 @@ def _render_live():
             stake_a      = round(retorno_alvo / odd_a, 2)
             total_c      = round(stake_h + stake_a, 2)
             lucro_c      = round(retorno_alvo - total_c, 2)
-
-            # Odd alvo para virar arb
             odd_alvo_a   = round(1 / (1 - 1/odd_h), 3) if odd_h > 1 else 0
 
-            if eh_arb_c:       icone = "🚨"
+            if eh_arb_c:        icone = "🚨"
             elif soma_p < 1.02: icone = "🔥"
-            else:               icone = "⚡"
+            elif d["cruzado"]:  icone = "🎯"
+            elif d["cruzando"]: icone = "⚡"
+            else:               icone = "📊"
 
             label_exp = (
-                f"{icone} {d['jogo']} | Casa {odd_h:.3f} × Fora {odd_a:.3f} "
-                f"| Margem {margem_c:+.2f}%"
+                f"{icone} {d['jogo']} | {d['mercado']} | "
+                f"Casa {odd_h:.3f} × Fora {odd_a:.3f} | Margem {margem_c:+.2f}%"
             )
             with st.expander(label_exp, expanded=eh_arb_c or soma_p < 1.02):
                 st.markdown(f"**{d['jogo']}** 🔴 — {d['liga']} — {d['mercado']}")
 
-                # Métricas
+                desc_h = d.get("desc_home", "Casa (Home)")
+                desc_a = d.get("desc_away", "Fora (Away)")
                 cm1, cm2, cm3, cm4 = st.columns(4)
-                cm1.metric("Casa Odd",    f"{odd_h:.3f}")
-                cm2.metric("Fora Odd",    f"{odd_a:.3f}")
-                cm3.metric("Diferença",   f"{diff_c:.3f}")
-                cm4.metric("Margem",      f"{margem_c:+.2f}%",
+                cm1.metric(desc_h,      f"{odd_h:.3f}", f"{d['prob_home']}%")
+                cm2.metric(desc_a,      f"{odd_a:.3f}", f"{d['prob_away']}%")
+                cm3.metric("Diferença", f"{diff_c:.3f}")
+                cm4.metric("Margem",    f"{margem_c:+.2f}%",
                            delta="✅ ARB!" if eh_arb_c else None)
 
-                st.markdown("**Distribuição de stakes:**")
                 df_c = pd.DataFrame([
                     {
-                        "Lado":        "Casa (Home)",
-                        "Odd":         odd_h,
-                        "Stake (R$)":  stake_h,
+                        "Lado":         desc_h,
+                        "Odd":          odd_h,
+                        "Stake (R$)":   stake_h,
                         "Retorno (R$)": round(stake_h * odd_h, 2),
-                        "Lucro (R$)":  round(stake_h * odd_h - total_c, 2),
+                        "Lucro (R$)":   round(stake_h * odd_h - total_c, 2),
                     },
                     {
-                        "Lado":        "Fora (Away)",
-                        "Odd":         odd_a,
-                        "Stake (R$)":  stake_a,
+                        "Lado":         desc_a,
+                        "Odd":          odd_a,
+                        "Stake (R$)":   stake_a,
                         "Retorno (R$)": round(stake_a * odd_a, 2),
-                        "Lucro (R$)":  round(stake_a * odd_a - total_c, 2),
+                        "Lucro (R$)":   round(stake_a * odd_a - total_c, 2),
                     },
                 ])
 
@@ -1132,17 +1112,23 @@ def _render_live():
                         f"✅ ARB CONFIRMADA — Lucro garantido: R$ {lucro_c:.2f} "
                         f"com R$ {total_c:.2f} investidos (qualquer resultado)."
                     )
-                    if d.get("link"):
-                        st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
+                elif d["cruzado"] or d["cruzando"]:
+                    falta = round(odd_alvo_a - odd_a, 3)
+                    st.warning(
+                        f"⚡ Falta {margem_c:.2f}% para arb. "
+                        f"Fora precisaria ≥ {odd_alvo_a:.3f} "
+                        f"(atual {odd_a:.3f} — falta {falta:.3f})."
+                    )
                 else:
                     falta = round(odd_alvo_a - odd_a, 3)
                     st.info(
-                        f"Falta {margem_c:.2f}% para arb. "
-                        f"A Fora precisaria chegar em ≥ {odd_alvo_a:.3f} "
-                        f"(atualmente {odd_a:.3f} — falta {falta:.3f})."
+                        f"📊 Monitorando — margem {margem_c:.2f}%. "
+                        f"Fora precisaria ≥ {odd_alvo_a:.3f} para arb "
+                        f"(falta {falta:.3f})."
                     )
-                    if d.get("link"):
-                        st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
+
+                if d.get("link"):
+                    st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
 # ---------------------------------------------------------------------------
 # Layout principal
