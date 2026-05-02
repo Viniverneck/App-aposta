@@ -1365,7 +1365,10 @@ def buscar_crossing_odds(
                         "liga":       liga,
                         "horario":    horario,
                         "casa":       casa_base,
-                        "mercado":    mkt_name,
+                        "mercado":    "Resultado Final (1X2)",
+                        "desc_home":  f"Vitória {home}",
+                        "desc_away":  f"Vitória {away}",
+                        "desc_draw":  "Empate" if odd_draw > 1 else None,
                         "odd_home":   round(odd_home, 3),
                         "odd_away":   round(odd_away, 3),
                         "odd_draw":   round(odd_draw, 3) if odd_draw > 1 else None,
@@ -1377,9 +1380,9 @@ def buscar_crossing_odds(
                         "status":     status,
                         "urgencia":   urgencia,
                         "link":       link,
-                        # Sinal de entrada recomendado
-                        "apostar_em": away if cruzado else (
-                            "Fora (tendência)" if odd_away > odd_home else "Casa (tendência)"
+                        "apostar_em": f"Vitória {away}" if cruzado else (
+                            f"Vitória {away} (tendência)" if odd_away > odd_home
+                            else f"Vitória {home} (tendência)"
                         ),
                     })
 
@@ -1405,7 +1408,10 @@ def buscar_crossing_odds(
                         "liga":      liga,
                         "horario":   horario,
                         "casa":      casa_base,
-                        "mercado":   f"Totals ({hdp})" if hdp else "Totals",
+                        "mercado":   f"Total de Gols ({hdp})" if hdp else "Total de Gols",
+                        "desc_home": f"Mais de {hdp} gols" if hdp else "Mais de",
+                        "desc_away": f"Menos de {hdp} gols" if hdp else "Menos de",
+                        "desc_draw": None,
                         "odd_home":  round(over, 3),
                         "odd_away":  round(under, 3),
                         "odd_draw":  None,
@@ -1417,7 +1423,7 @@ def buscar_crossing_odds(
                         "status":    status,
                         "urgencia":  urgencia,
                         "link":      link,
-                        "apostar_em": f"Menos de {hdp}" if cruzado else f"Mais de {hdp}",
+                        "apostar_em": f"Menos de {hdp} gols" if cruzado else f"Mais de {hdp} gols",
                     })
 
     # Ordenar: cruzados primeiro, depois cruzando, depois monitorar
