@@ -22,3 +22,6 @@ Thumbs.db
 
 # Cache de alertas Telegram enviados
 .telegram_ids_enviados.json
+
+# Cache de stats históricas
+.stats_cache.json
