@@ -138,6 +138,17 @@ _STAT_MAP = {
     "Saves": "Defesas", "Shots": "Chutes", "Threes": "3 Pontos",
 }
 
+
+# Mercados que usam estrutura over/under por jogador (cada item em odds_info é um jogador)
+_MERCADOS_PROPS_POR_JOGADOR: set[str] = {
+    "Points O/U", "Rebounds O/U", "Assists O/U",
+    "Steals O/U", "Blocks O/U", "Threes Made O/U",
+    "Field Goals Made O/U",
+    "Points & Rebounds O/U", "Points & Assists O/U",
+    "Assists & Rebounds O/U", "Points, Assists & Rebounds O/U",
+    "Steals & Blocks O/U",
+}
+
 # Mercados sim/não (NBA)
 _MERCADOS_SIM_NAO: set[str] = {
     "Double Double", "Triple Double",
@@ -702,10 +713,13 @@ def rodar_sistema(
 
     janela_horas = JANELA_HORAS_NBA if modo == "nba" else JANELA_HORAS_FUTEBOL
 
-    # Stats históricas para o Poisson (injetadas pelo app com cache 24h)
+    # Stats históricas — injetadas pelo app (cache 24h em arquivo)
     if stats_ligas is None:
-        logger.warning("stats_ligas não fornecidas — buscando agora (sem cache)")
+        logger.warning("stats_ligas não fornecidas — buscando agora")
         stats_ligas = buscar_stats_ligas()
+    if not stats_ligas:
+        logger.warning("stats_ligas vazias — usando padrão")
+        stats_ligas = {}
     logger.info("Stats disponíveis para %d times", len(stats_ligas))
 
     # A. Value bets (filtradas por modo após processar)
@@ -782,11 +796,10 @@ def rodar_sistema(
 
     odds_lista = get_odds_multi(event_ids)
 
-    # C. Dropping odds — futebol e basquete combinados
-    drop_fut  = get_dropping_odds(sport="football",   min_drop_pct=5.0)
-    drop_bask = get_dropping_odds(sport="basketball", min_drop_pct=5.0)
-    dropping_index = {**drop_fut, **drop_bask}
-    logger.info("Dropping odds: %d futebol + %d basquete", len(drop_fut), len(drop_bask))
+    # C. Dropping odds — só futebol (basketball retorna 403 no plano atual)
+    drop_fut  = get_dropping_odds(sport="football", min_drop_pct=5.0)
+    dropping_index = {**drop_fut}
+    logger.info("Dropping odds: %d eventos", len(drop_fut))
 
     # D. Processar odds multi
     resultados_poisson: dict[str, dict] = {}
@@ -826,6 +839,92 @@ def rodar_sistema(
                     skip_sem_odds += 1
                     continue
 
+                # Link direto para a casa
+                casa_base = casa.split(" ")[0]
+                raw_link  = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
+                link = (raw_link
+                    .replace("https://www.bet365.com", "https://www.bet365.bet.br")
+                    .replace("https://bet365.com",     "https://www.bet365.bet.br")
+                    .replace("https://www.betano.com",  "https://www.betano.bet.br")
+                    .replace("https://betano.com",      "https://www.betano.bet.br"))
+
+                drop_sinal = bool(drop_info and drop_info.get("market") == market_name)
+
+                # ── Mercados de props por jogador (over/under explícito) ───
+                if market_name in _MERCADOS_PROPS_POR_JOGADOR:
+                    for item in odds_info:
+                        if not isinstance(item, dict):
+                            continue
+
+                        raw_label = item.get("label", "")
+                        hdp_val   = item.get("hdp")
+                        over_val  = _safe_float(item.get("over"))
+                        under_val = _safe_float(item.get("under"))
+
+                        # Limpar label: "Joel Embiid (1) (4.5)" → "Joel Embiid"
+                        import re as _re2
+                        nome = _re2.sub(r"\s*\(\d+\)\s*", " ", raw_label).strip()
+                        nome = _re2.sub(r"\s*\([\d.]+\)\s*$", "", nome).strip()
+
+                        for direcao, odd_val in [("over", over_val), ("under", under_val)]:
+                            if odd_val <= 1:
+                                continue
+                            if not (odd_min <= odd_val <= odd_max):
+                                skip_faixa += 1
+                                continue
+
+                            # Descrição clara: "Joel Embiid — Assists Mais de 4.5"
+                            stat_map = {
+                                "Points O/U": "Pontos", "Rebounds O/U": "Rebotes",
+                                "Assists O/U": "Assistências", "Steals O/U": "Roubos",
+                                "Blocks O/U": "Bloqueios", "Threes Made O/U": "Cestas 3pts",
+                                "Field Goals Made O/U": "Cestas",
+                                "Points & Rebounds O/U": "Pts+Reb",
+                                "Points & Assists O/U": "Pts+Ast",
+                                "Assists & Rebounds O/U": "Ast+Reb",
+                                "Points, Assists & Rebounds O/U": "Pts+Ast+Reb",
+                                "Steals & Blocks O/U": "Roubo+Bloq",
+                            }
+                            stat = stat_map.get(market_name, market_name)
+                            dir_pt = "Mais de" if direcao == "over" else "Menos de"
+                            linha_str = f" {hdp_val}" if hdp_val is not None else ""
+                            tipo = f"{nome} — {stat}{linha_str} ({dir_pt})"
+
+                            # EV: usa prob implícita da odd (mais preciso que Poisson para props)
+                            prob_impl = 1 / odd_val
+                            ev = round((prob_impl * odd_val) - 1, 3)  # sempre ~0 pela margem da casa
+                            # Para props usamos a odd da casa oposta para estimar EV real
+                            odd_oposta = under_val if direcao == "over" else over_val
+                            if odd_oposta > 1:
+                                prob_fair = 1 / odd_oposta
+                                prob_real = 1 - prob_fair  # prob implícita sem margem
+                                ev = round((prob_real * odd_val) - 1, 3)
+
+                            if ev < EV_MINIMO:
+                                skip_ev += 1
+                                continue
+
+                            aceitos += 1
+                            chave = f"{home} x {away} | {tipo} | {casa}"
+                            resultados_poisson[chave] = {
+                                "jogo":        f"{home} x {away}",
+                                "liga":        liga,
+                                "horario":     horario,
+                                "tipo":        tipo,
+                                "mercado":     market_name,
+                                "linha":       hdp_val,
+                                "casa":        casa,
+                                "odd":         round(odd_val, 2),
+                                "prob_modelo": round((1/odd_val) * 100, 2),
+                                "ev":          ev,
+                                "score":       round((1/odd_val) * odd_val, 2),
+                                "fonte":       "poisson",
+                                "drop_sinal":  drop_sinal,
+                                "link":        link,
+                            }
+                    continue  # próximo market
+
+                # ── Mercados padrão (home/away/draw) ─────────────────────
                 linha, label = _extrair_linha_label(market, odds_info)
 
                 if not isinstance(odds_info[0], dict):
@@ -834,7 +933,7 @@ def rodar_sistema(
                     continue
 
                 for lado, odd_valor in odds_info[0].items():
-                    if lado in {"hdp", "label"}:
+                    if lado in {"hdp", "label", "over", "under"}:
                         continue
                     try:
                         odd = float(odd_valor)
@@ -854,33 +953,22 @@ def rodar_sistema(
                         continue
 
                     aceitos += 1
-                    drop_sinal = bool(drop_info and drop_info.get("bet_side") == lado)
-
-                    # Link direto: tenta a casa exata, fallback para Bet365
-                    casa_base = casa.split(" ")[0]  # "Bet365 (no latency)" → "Bet365"
-                    raw_link = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
-                    link = (raw_link
-                        .replace("https://www.bet365.com", "https://www.bet365.bet.br")
-                        .replace("https://bet365.com",     "https://www.bet365.bet.br")
-                        .replace("https://www.betano.com",  "https://www.betano.bet.br")
-                        .replace("https://betano.com",      "https://www.betano.bet.br"))
-
                     chave = f"{home} x {away} | {tipo} | {casa}"
                     resultados_poisson[chave] = {
-                        "jogo": f"{home} x {away}",
-                        "liga": liga,
-                        "horario": horario,
-                        "tipo": tipo,
-                        "mercado": market_name,
-                        "linha": linha,
-                        "casa": casa,
-                        "odd": round(odd, 2),
+                        "jogo":        f"{home} x {away}",
+                        "liga":        liga,
+                        "horario":     horario,
+                        "tipo":        tipo,
+                        "mercado":     market_name,
+                        "linha":       linha,
+                        "casa":        casa,
+                        "odd":         round(odd, 2),
                         "prob_modelo": round(prob * 100, 2),
-                        "ev": ev,
-                        "score": round(prob * odd, 2),
-                        "fonte": "poisson",
-                        "drop_sinal": drop_sinal,
-                        "link": link,
+                        "ev":          ev,
+                        "score":       round(prob * odd, 2),
+                        "fonte":       "poisson",
+                        "drop_sinal":  drop_sinal,
+                        "link":        link,
                     }
 
         logger.debug("%s x %s | aceitos=%d sem_odds=%d fmt=%d faixa=%d ev=%d",
