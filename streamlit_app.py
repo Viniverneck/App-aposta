@@ -56,6 +56,7 @@ DEFAULTS = {
     "auto_refresh": False,
     "telegram_ativo": False,
     "ids_alertados": set(),
+    "atualizar_tudo_ts": 0.0,
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -115,6 +116,24 @@ with st.sidebar:
     buscar_fut   = col_b1.button("⚽ Futebol", use_container_width=True)
     buscar_nba   = col_b2.button("🏀 NBA",     use_container_width=True)
     buscar_tenis = col_b3.button("🎾 Tênis",   use_container_width=True)
+
+    # Botão geral com cooldown de 15 min
+    COOLDOWN_GERAL = 15 * 60  # segundos
+    ts_geral   = st.session_state.get("atualizar_tudo_ts", 0.0)
+    elapsed_g  = time.time() - ts_geral
+    cooldown_ativo = ts_geral > 0 and elapsed_g < COOLDOWN_GERAL
+    if cooldown_ativo:
+        restante_g = int(COOLDOWN_GERAL - elapsed_g)
+        st.button(
+            f"🔄 Atualizar Tudo ({restante_g//60}min {restante_g%60:02d}s)",
+            use_container_width=True, disabled=True,
+        )
+        buscar_tudo = False
+    else:
+        buscar_tudo = st.button(
+            "🔄 Atualizar Tudo", use_container_width=True, type="primary",
+            help="Atualiza Futebol → NBA → Tênis em sequência. Cooldown: 15 min.",
+        )
 
     st.divider()
     st.markdown("**🔍 Comparação de Odds**")
@@ -244,6 +263,42 @@ if buscar_tenis:
         )
     st.session_state["banca"] = banca
     st.session_state["qtd"]   = qtd
+
+# ── Botão Atualizar Tudo ────────────────────────────────────────────────
+if buscar_tudo:
+    stats = _cached_stats_ligas()
+    prog  = st.progress(0, text="Iniciando...")
+
+    prog.progress(10, text="⚽ Buscando Futebol...")
+    st.session_state["res_fut"] = rodar_sistema(
+        odd_min, odd_max, set(sel_fut) or None, stats_ligas=stats, modo="futebol"
+    )
+    st.session_state["arbs_fut"] = processar_arbitrage(
+        get_arbitrage(limit=50), esporte="futebol"
+    )
+
+    prog.progress(40, text="🏀 Buscando NBA...")
+    st.session_state["res_nba"] = rodar_sistema(
+        odd_min, odd_max, set(sel_nba) or None, stats_ligas=stats, modo="nba"
+    )
+    st.session_state["arbs_nba"] = processar_arbitrage(
+        get_arbitrage(limit=50), esporte="nba"
+    )
+
+    prog.progress(70, text="🎾 Buscando Tênis...")
+    st.session_state["res_tenis"] = rodar_sistema(
+        odd_min, odd_max, set(sel_tenis) or None, stats_ligas={}, modo="tenis"
+    )
+    st.session_state["arbs_tenis"] = processar_arbitrage(
+        get_arbitrage(limit=50), esporte="tenis"
+    )
+
+    prog.progress(100, text="✅ Concluído!")
+    st.session_state["banca"]          = banca
+    st.session_state["qtd"]            = qtd
+    st.session_state["atualizar_tudo_ts"] = time.time()
+    time.sleep(0.5)
+    prog.empty()
 
 # Salvar esp_comp e margem_max para o auto-refresh usar
 st.session_state["esp_comp_cache"]  = esp_comp if esp_comp else ["Football","Basketball","Tennis"]
@@ -963,6 +1018,131 @@ def _render_live():
             if d.get("link"):
                 st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
+    # ── Calculadora Automática de Cruzamento ────────────────────────────────
+    st.divider()
+    st.markdown("### 🧮 Calculadora de Cruzamento")
+    st.caption(
+        "Mostra automaticamente as odds dos jogos ao vivo com odds acima do threshold "
+        "configurado, com cálculo de arb e distribuição de stakes em tempo real."
+    )
+
+    # Filtro de odd mínima para exibir na calculadora
+    cl1, cl2 = st.columns([2, 1])
+    odd_min_calc = cl1.slider(
+        "Odd mínima para exibir", min_value=1.50, max_value=5.00,
+        value=2.60, step=0.05,
+        help="Mostra só jogos onde AMBAS as odds estão acima desse valor — região de cruzamento.",
+        key="odd_min_calc_slider",
+    )
+    val_calc = cl2.number_input(
+        "Valor investido (R$)", min_value=10.0, max_value=100_000.0,
+        value=float(st.session_state.get("valor_invest", 100.0)),
+        step=10.0, key="calc_valor_auto",
+    )
+
+    # Filtrar dados: ambas as odds acima do threshold
+    dados_calc = [
+        d for d in (dados or [])
+        if d["odd_home"] >= odd_min_calc and d["odd_away"] >= odd_min_calc
+    ] if dados else []
+
+    if not dados_calc:
+        if dados:
+            st.info(
+                f"Nenhum jogo com ambas as odds ≥ {odd_min_calc:.2f}. "
+                f"Reduza o threshold ou aguarde as odds se moverem."
+            )
+        else:
+            st.info("Clique em **⚡ Buscar Live** para carregar os jogos ao vivo.")
+    else:
+        st.caption(f"{len(dados_calc)} jogo(s) com odds ≥ {odd_min_calc:.2f}")
+
+        for d in dados_calc:
+            odd_h = d["odd_home"]
+            odd_a = d["odd_away"]
+
+            soma_p   = (1/odd_h) + (1/odd_a)
+            margem_c = round((soma_p - 1) * 100, 2)
+            eh_arb_c = soma_p < 1.0
+            diff_c   = round(abs(odd_h - odd_a), 3)
+
+            # Stakes ótimas
+            retorno_alvo = val_calc / soma_p
+            stake_h      = round(retorno_alvo / odd_h, 2)
+            stake_a      = round(retorno_alvo / odd_a, 2)
+            total_c      = round(stake_h + stake_a, 2)
+            lucro_c      = round(retorno_alvo - total_c, 2)
+
+            # Odd alvo para virar arb
+            odd_alvo_a   = round(1 / (1 - 1/odd_h), 3) if odd_h > 1 else 0
+
+            if eh_arb_c:       icone = "🚨"
+            elif soma_p < 1.02: icone = "🔥"
+            else:               icone = "⚡"
+
+            label_exp = (
+                f"{icone} {d['jogo']} | Casa {odd_h:.3f} × Fora {odd_a:.3f} "
+                f"| Margem {margem_c:+.2f}%"
+            )
+            with st.expander(label_exp, expanded=eh_arb_c or soma_p < 1.02):
+                st.markdown(f"**{d['jogo']}** 🔴 — {d['liga']} — {d['mercado']}")
+
+                # Métricas
+                cm1, cm2, cm3, cm4 = st.columns(4)
+                cm1.metric("Casa Odd",    f"{odd_h:.3f}")
+                cm2.metric("Fora Odd",    f"{odd_a:.3f}")
+                cm3.metric("Diferença",   f"{diff_c:.3f}")
+                cm4.metric("Margem",      f"{margem_c:+.2f}%",
+                           delta="✅ ARB!" if eh_arb_c else None)
+
+                st.markdown("**Distribuição de stakes:**")
+                df_c = pd.DataFrame([
+                    {
+                        "Lado":        "Casa (Home)",
+                        "Odd":         odd_h,
+                        "Stake (R$)":  stake_h,
+                        "Retorno (R$)": round(stake_h * odd_h, 2),
+                        "Lucro (R$)":  round(stake_h * odd_h - total_c, 2),
+                    },
+                    {
+                        "Lado":        "Fora (Away)",
+                        "Odd":         odd_a,
+                        "Stake (R$)":  stake_a,
+                        "Retorno (R$)": round(stake_a * odd_a, 2),
+                        "Lucro (R$)":  round(stake_a * odd_a - total_c, 2),
+                    },
+                ])
+
+                def _cor_lc(val):
+                    if isinstance(val, float):
+                        if val > 0: return "color:#2ecc71;font-weight:500"
+                        if val < 0: return "color:#e74c3c"
+                    return ""
+
+                st.dataframe(
+                    df_c.style
+                    .map(_cor_lc, subset=["Lucro (R$)"])
+                    .format({"Odd": "{:.3f}", "Stake (R$)": "R$ {:.2f}",
+                             "Retorno (R$)": "R$ {:.2f}", "Lucro (R$)": "R$ {:.2f}"}),
+                    width="stretch", hide_index=True,
+                )
+
+                if eh_arb_c:
+                    st.success(
+                        f"✅ ARB CONFIRMADA — Lucro garantido: R$ {lucro_c:.2f} "
+                        f"com R$ {total_c:.2f} investidos (qualquer resultado)."
+                    )
+                    if d.get("link"):
+                        st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
+                else:
+                    falta = round(odd_alvo_a - odd_a, 3)
+                    st.info(
+                        f"Falta {margem_c:.2f}% para arb. "
+                        f"A Fora precisaria chegar em ≥ {odd_alvo_a:.3f} "
+                        f"(atualmente {odd_a:.3f} — falta {falta:.3f})."
+                    )
+                    if d.get("link"):
+                        st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
 # ---------------------------------------------------------------------------
 # Layout principal
