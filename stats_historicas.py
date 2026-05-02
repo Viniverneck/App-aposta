@@ -151,14 +151,59 @@ def _calcular_medias(eventos: list[dict]) -> dict[str, dict]:
 # Interface pública: buscar stats de todas as ligas
 # ---------------------------------------------------------------------------
 
+# Cache em arquivo — persiste entre sessões/restarts do Streamlit
+_STATS_CACHE_FILE = os.path.join(os.path.dirname(__file__), ".stats_cache.json")
+_STATS_TTL_HORAS  = 24
+
+
+def _carregar_stats_cache() -> dict | None:
+    """Carrega stats do cache em arquivo. Retorna None se expirado ou inexistente."""
+    if not os.path.exists(_STATS_CACHE_FILE):
+        return None
+    try:
+        import json
+        with open(_STATS_CACHE_FILE, "r") as f:
+            data = json.load(f)
+        ts    = data.get("timestamp", 0)
+        stats = data.get("stats", {})
+        age_h = (datetime.now(timezone.utc).timestamp() - ts) / 3600
+        if age_h > _STATS_TTL_HORAS:
+            logger.debug("Stats cache expirado (%.1fh)", age_h)
+            return None
+        logger.info("Stats carregadas do cache (%.1fh atrás, %d times)", age_h, len(stats))
+        return stats
+    except Exception as exc:
+        logger.warning("Erro ao ler stats cache: %s", exc)
+        return None
+
+
+def _salvar_stats_cache(stats: dict) -> None:
+    """Salva stats no arquivo de cache com timestamp."""
+    try:
+        import json
+        with open(_STATS_CACHE_FILE, "w") as f:
+            json.dump({
+                "timestamp": datetime.now(timezone.utc).timestamp(),
+                "stats": stats,
+            }, f)
+        logger.debug("Stats salvas no cache (%d times)", len(stats))
+    except Exception as exc:
+        logger.warning("Erro ao salvar stats cache: %s", exc)
+
+
 def buscar_stats_ligas(ligas: list[str] | None = None) -> dict[str, dict]:
     """
     Busca e agrega médias de gols de todas as ligas configuradas.
     Retorna dict unificado {nome_time: {media_marcados, media_sofridos, jogos}}.
 
-    Custo: 1 chamada de API por liga.
-    Cache de 24h recomendado na camada do Streamlit (st.cache_data ttl=86400).
+    Custo: 1 chamada de API por liga — mas usa cache em arquivo por 24h,
+    então só faz chamadas uma vez por dia mesmo que o app reinicie.
     """
+    # Tentar cache em arquivo primeiro
+    cached = _carregar_stats_cache()
+    if cached is not None:
+        return cached
+
     if ligas is None:
         ligas = LIGAS_STATS
 
@@ -176,6 +221,11 @@ def buscar_stats_ligas(ligas: list[str] | None = None) -> dict[str, dict]:
 
     medias = _calcular_medias(todos_eventos)
     logger.info("Stats calculadas para %d times", len(medias))
+
+    # Salvar no cache para evitar rebuscar nas próximas 24h
+    if medias:
+        _salvar_stats_cache(medias)
+
     return medias
 
 
