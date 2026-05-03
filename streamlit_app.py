@@ -199,12 +199,8 @@ with st.sidebar:
     st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U",
-         "Double Double","Player Points Milestones","Player Rebounds Milestones",
-        "Player Assists Milestones","Player Threes Milestones"]
-        default=["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U",
-         "Double Double","Player Points Milestones","Player Rebounds Milestones",
-        "Player Assists Milestones","Player Threes Milestones"]
+        ["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U","Double Double","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"]
+        default=["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U","Double Double","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"]
         label_visibility="collapsed",
     )
     threshold_live = st.slider(
