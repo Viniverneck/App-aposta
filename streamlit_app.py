@@ -64,6 +64,12 @@ DEFAULTS = {
     "banca": 1_000.0, "qtd": 10,
     "valor_invest": 100.0, "intervalo_refresh": 2,
     "auto_refresh": False,
+    "auto_refresh_live": False, "intervalo_live": 1,
+    "esp_comp_cache": ["Football","Basketball","Tennis"],
+    "margem_max_cache": 3.0,
+    "mkt_live_cache": ["ML","Totals"],
+    "threshold_live_cache": 0.15,
+    "odd_alerta_live": 2.40,
     "telegram_ativo": False,
     "ids_alertados": set(),
     "atualizar_tudo_ts": 0.0,
@@ -819,11 +825,6 @@ def _render_comparacao():
                  "Melhor Op":  "{:.3f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
-
-    # ── Expanders: arbs e quentes primeiro, expandidos ────────────────────
-    prioritarios = arbs_reais + quentes
-    resto        = [d for d in dados if d not in prioritarios][:max(0, 15 - len(prioritarios))]
-    lista_exp    = prioritarios + resto
 
     # ── Calculadora Automática — todos os jogos ─────────────────────────────
     st.divider()
