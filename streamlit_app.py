@@ -202,7 +202,7 @@ with st.sidebar:
         ["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U",
          "Double Double","Player Points Milestones","Player Rebounds Milestones",
         "Player Assists Milestones","Player Threes Milestones"]
-        default=[["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U",
+        default=["ML", "Totals","Points O/U","Rebounds O/U","Assists O/U",
          "Double Double","Player Points Milestones","Player Rebounds Milestones",
         "Player Assists Milestones","Player Threes Milestones"]
         label_visibility="collapsed",
