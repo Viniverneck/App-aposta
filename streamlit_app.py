@@ -96,7 +96,7 @@ with st.sidebar:
 
     st.caption("⚽ Mercados Futebol")
     sel_fut = st.multiselect("Futebol", MERCADOS_FUTEBOL,
-                              default=["ML","Totals","Over/Under"],
+                              default=["ML","Totals","Over/Under","Corner"],
                               label_visibility="collapsed")
 
     st.caption("🏀 Mercados NBA")
@@ -199,8 +199,8 @@ with st.sidebar:
     st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Totals"],
-        default=["ML", "Totals"],
+        ["ML", "Totals", "Over/Under"],
+        default=["ML", "Totals", "Over/Under"],
         label_visibility="collapsed",
     )
     threshold_live = st.slider(
@@ -309,7 +309,7 @@ st.session_state["esp_comp_cache"]  = esp_comp if esp_comp else ["Football","Bas
 st.session_state["margem_max_cache"] = margem_max
 
 if buscar_comp:
-    with st.spinner("Comparando odds Bet365 x Betano..."):
+    with st.spinner("Comparando odds Bet365 x Betano BR..."):
         st.session_state["comparacao"] = buscar_comparacao_odds(
             esportes=st.session_state["esp_comp_cache"],
             margem_max=margem_max,
@@ -326,7 +326,7 @@ if buscar_live:
     with st.spinner("Buscando crossing odds ao vivo..."):
         st.session_state["live_dados"] = buscar_crossing_odds(
             threshold=threshold_live,
-            mercados=mkt_live or ["ML","Totals"],
+            mercados=mkt_live or ["ML","Totals", "Over/Under"],
         )
         st.session_state["live_ts"]       = time.time()
         st.session_state["mkt_live_cache"]      = mkt_live
@@ -780,8 +780,8 @@ def _render_comparacao():
             "Tipo":       d["tipo"],
             "Bet365 VB":  d["odd_b365_vb"],
             "Bet365 Op":  d["odd_b365_op"],
-            "Betano VB":  d["odd_betano_vb"] or "—",
-            "Betano Op":  d["odd_betano_op"] or "—",
+            "Betano BR VB":  d["odd_Betano_BR_vb"] or "—",
+            "Betano BR Op":  d["odd_Betano_BR_op"] or "—",
             "Melhor VB":  d["melhor_vb"],
             "Melhor Op":  d["melhor_op"],
             "Margem (%)": d["margem_pct"],
@@ -832,12 +832,12 @@ def _render_comparacao():
                 st.metric(desc_vb, f"{d['odd_b365_vb']:.3f}")
                 st.metric(desc_op, f"{d['odd_b365_op']:.3f}")
             with col2:
-                st.markdown("**Betano**")
-                link_n = d.get("link_betano","")
-                if link_n: st.markdown(f"[↗ Abrir Betano]({link_n})")
+                st.markdown("**Betano BR**")
+                link_n = d.get("link_Betano_BR","")
+                if link_n: st.markdown(f"[↗ Abrir Betano BR]({link_n})")
                 else:      st.caption("Sem link direto")
-                st.metric(desc_vb, f"{d['odd_betano_vb']:.3f}" if d["odd_betano_vb"] else "—")
-                st.metric(desc_op, f"{d['odd_betano_op']:.3f}" if d["odd_betano_op"] else "—")
+                st.metric(desc_vb, f"{d['odd_Betano_BR_vb']:.3f}" if d["odd_Betano_BR_vb"] else "—")
+                st.metric(desc_op, f"{d['odd_Betano_BR_op']:.3f}" if d["odd_Betano_BR_op"] else "—")
 
             st.divider()
             if d["eh_arb"]:
