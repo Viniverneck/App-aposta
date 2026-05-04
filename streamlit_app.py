@@ -43,6 +43,127 @@ st.set_page_config(page_title="Trader PRO", page_icon="🚀", layout="wide")
 st.title("🚀 Trader PRO — Sistema Completo")
 
 # ---------------------------------------------------------------------------
+# CSS Responsivo — adapta layout para iPad e mobile
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+/* ── iPad / Tablet (até 1024px) ────────────────────────────────────────── */
+@media (max-width: 1024px) {
+
+    /* Sidebar mais estreita */
+    [data-testid="stSidebar"] {
+        min-width: 260px !important;
+        max-width: 280px !important;
+    }
+
+    /* Fonte levemente menor */
+    html, body, [class*="css"] {
+        font-size: 14px !important;
+    }
+
+    /* Métricas em linha — reduz altura */
+    [data-testid="stMetric"] {
+        padding: 4px 8px !important;
+    }
+
+    /* Tabelas com scroll horizontal */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    /* Colunas empilham em telas menores */
+    [data-testid="column"] {
+        min-width: 120px !important;
+    }
+
+    /* Botões maiores para toque */
+    .stButton > button {
+        min-height: 44px !important;
+        font-size: 15px !important;
+    }
+
+    /* Inputs maiores para toque */
+    .stNumberInput input,
+    .stSlider,
+    .stSelectSlider {
+        min-height: 40px !important;
+    }
+
+    /* Expanders com padding reduzido */
+    .streamlit-expanderHeader {
+        padding: 8px 12px !important;
+        font-size: 13px !important;
+    }
+}
+
+/* ── Mobile (até 768px) ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+    /* Ocultar sidebar por padrão — usar botão hambúrguer */
+    [data-testid="stSidebar"] {
+        transform: translateX(-100%) !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        transform: translateX(0) !important;
+    }
+
+    /* Layout em coluna única */
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    /* Radio de modo em coluna */
+    .stRadio > div {
+        flex-direction: column !important;
+        gap: 4px !important;
+    }
+
+    /* Tabelas com altura máxima e scroll */
+    [data-testid="stDataFrame"] iframe {
+        max-height: 400px !important;
+        overflow-y: auto !important;
+    }
+
+    /* Título menor */
+    h1 {
+        font-size: 1.4rem !important;
+    }
+
+    /* Métricas compactas */
+    [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+    }
+}
+
+/* ── Touch — melhora scroll em todos os dispositivos touch ─────────────── */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+.main .block-container {
+    -webkit-overflow-scrolling: touch !important;
+    overflow-y: auto !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# Modo compacto — menos dados, mais leve para iPad
+COMPACTO = st.sidebar.toggle(
+    "📱 Modo compacto",
+    value=st.session_state.get("modo_compacto", False),
+    help="Reduz dados exibidos. Recomendado para iPad e conexões lentas.",
+    key="modo_compacto_toggle",
+)
+st.session_state["modo_compacto"] = COMPACTO
+
+
+# ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
 
@@ -54,9 +175,16 @@ DEFAULTS = {
     "banca": 1_000.0, "qtd": 10,
     "valor_invest": 100.0, "intervalo_refresh": 2,
     "auto_refresh": False,
+    "auto_refresh_live": False, "intervalo_live": 1,
+    "esp_comp_cache": ["Football","Basketball","Tennis"],
+    "margem_max_cache": 3.0,
+    "mkt_live_cache": ["ML","Totals"],
+    "threshold_live_cache": 0.15,
+    "odd_alerta_live": 2.40,
     "telegram_ativo": False,
     "ids_alertados": set(),
     "atualizar_tudo_ts": 0.0,
+    "modo_compacto": False,
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -96,7 +224,7 @@ with st.sidebar:
 
     st.caption("⚽ Mercados Futebol")
     sel_fut = st.multiselect("Futebol", MERCADOS_FUTEBOL,
-                              default=["ML","Totals","Over/Under","Corner"],
+                              default=["ML","Totals","Over/Under"],
                               label_visibility="collapsed")
 
     st.caption("🏀 Mercados NBA")
@@ -199,8 +327,8 @@ with st.sidebar:
     st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Totals", "Over/Under"],
-        default=["ML", "Totals", "Over/Under"],
+        ["ML", "Totals"],
+        default=["ML", "Totals"],
         label_visibility="collapsed",
     )
     threshold_live = st.slider(
@@ -309,7 +437,7 @@ st.session_state["esp_comp_cache"]  = esp_comp if esp_comp else ["Football","Bas
 st.session_state["margem_max_cache"] = margem_max
 
 if buscar_comp:
-    with st.spinner("Comparando odds Bet365 x Betano BR..."):
+    with st.spinner("Comparando odds Bet365 x Betano..."):
         st.session_state["comparacao"] = buscar_comparacao_odds(
             esportes=st.session_state["esp_comp_cache"],
             margem_max=margem_max,
@@ -326,7 +454,7 @@ if buscar_live:
     with st.spinner("Buscando crossing odds ao vivo..."):
         st.session_state["live_dados"] = buscar_crossing_odds(
             threshold=threshold_live,
-            mercados=mkt_live or ["ML","Totals", "Over/Under"],
+            mercados=mkt_live or ["ML","Totals"],
         )
         st.session_state["live_ts"]       = time.time()
         st.session_state["mkt_live_cache"]      = mkt_live
@@ -567,7 +695,8 @@ def _render_futebol():
             df = (
                 pd.DataFrame(res)
                 .sort_values("ev", ascending=False)
-                .head(qtd_ref).reset_index(drop=True)
+                .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
+                .reset_index(drop=True)
             )
             m1,m2,m3,m4 = st.columns(4)
             m1.metric("Picks",      len(df))
@@ -608,7 +737,8 @@ def _render_nba():
             df = (
                 pd.DataFrame(res)
                 .sort_values("ev", ascending=False)
-                .head(qtd_ref).reset_index(drop=True)
+                .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
+                .reset_index(drop=True)
             )
             m1,m2,m3,m4 = st.columns(4)
             m1.metric("Picks",     len(df))
@@ -655,7 +785,8 @@ def _render_tenis():
             df = (
                 pd.DataFrame(res)
                 .sort_values("ev", ascending=False)
-                .head(qtd_ref).reset_index(drop=True)
+                .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
+                .reset_index(drop=True)
             )
             m1,m2,m3,m4 = st.columns(4)
             m1.metric("Picks",     len(df))
@@ -780,8 +911,8 @@ def _render_comparacao():
             "Tipo":       d["tipo"],
             "Bet365 VB":  d["odd_b365_vb"],
             "Bet365 Op":  d["odd_b365_op"],
-            "Betano BR VB":  d["odd_Betano_BR_vb"] or "—",
-            "Betano BR Op":  d["odd_Betano_BR_op"] or "—",
+            "Betano VB":  d["odd_betano_vb"] or "—",
+            "Betano Op":  d["odd_betano_op"] or "—",
             "Melhor VB":  d["melhor_vb"],
             "Melhor Op":  d["melhor_op"],
             "Margem (%)": d["margem_pct"],
@@ -806,67 +937,16 @@ def _render_comparacao():
     )
     st.dataframe(styled, width="stretch", hide_index=True)
 
-    # ── Expanders: arbs e quentes primeiro, expandidos ────────────────────
-    prioritarios = arbs_reais + quentes
-    resto        = [d for d in dados if d not in prioritarios][:max(0, 15 - len(prioritarios))]
-    lista_exp    = prioritarios + resto
-
-    st.markdown("### 📌 Como executar")
-    for d in lista_exp:
-        if d["eh_arb"]:              icone, exp = "🚨", True
-        elif d["margem_pct"] < 101:  icone, exp = "🔥", True
-        else:                        icone, exp = "👀", False
-
-        desc_vb = {"home":"Vitória Casa","away":"Vitória Fora","draw":"Empate"}.get(d["lado_vb"], d["lado_vb"].upper())
-        desc_op = {"home":"Vitória Casa","away":"Vitória Fora","draw":"Empate"}.get(d["lado_op"], d["lado_op"].upper())
-
-        label = f"{icone} {d['jogo']} | {d['mercado']} | {d['tipo']} | Margem: {d['margem_pct']:.2f}%"
-        with st.expander(label, expanded=exp):
-            st.markdown(f"**{d['jogo']}** — {d['liga']} — {d['horario']}")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Bet365**")
-                link_b = d.get("link_b365","")
-                if link_b: st.markdown(f"[↗ Abrir Bet365]({link_b})")
-                st.metric(desc_vb, f"{d['odd_b365_vb']:.3f}")
-                st.metric(desc_op, f"{d['odd_b365_op']:.3f}")
-            with col2:
-                st.markdown("**Betano BR**")
-                link_n = d.get("link_Betano_BR","")
-                if link_n: st.markdown(f"[↗ Abrir Betano BR]({link_n})")
-                else:      st.caption("Sem link direto")
-                st.metric(desc_vb, f"{d['odd_Betano_BR_vb']:.3f}" if d["odd_Betano_BR_vb"] else "—")
-                st.metric(desc_op, f"{d['odd_Betano_BR_op']:.3f}" if d["odd_Betano_BR_op"] else "—")
-
-            st.divider()
-            if d["eh_arb"]:
-                retorno_alvo = valor_inv / (1/d["melhor_vb"] + 1/d["melhor_op"])
-                stake_vb     = round(retorno_alvo / d["melhor_vb"], 2)
-                stake_op     = round(retorno_alvo / d["melhor_op"], 2)
-                total        = round(stake_vb + stake_op, 2)
-                lucro        = round(retorno_alvo - total, 2)
-                st.success(f"✅ ARB REAL — R$ {lucro:.2f} de lucro com R$ {total:.2f} investidos")
-                st.markdown(
-                    f"- **{desc_vb}** @ {d['melhor_vb']:.3f} → apostar **R$ {stake_vb:.2f}**\n"
-                    f"- **{desc_op}** @ {d['melhor_op']:.3f} → apostar **R$ {stake_op:.2f}**"
-                )
-            else:
-                st.info(
-                    f"Margem: {d['margem_pct']:.2f}% — falta {d['margem_pct']-100:.2f}% "
-                    "para arb real. Odds mudam rápido — monitore."
-                )
-
-
 # ---------------------------------------------------------------------------
-# Layout principal
+# MODO LIVE — Crossing Odds
 # ---------------------------------------------------------------------------
 
 def _render_live():
-    dados     = st.session_state.get("live_dados")
-    live_ts   = st.session_state.get("live_ts", 0.0)
-    auto_ref  = st.session_state.get("auto_refresh_live", False)
+    dados    = st.session_state.get("live_dados")
+    live_ts  = st.session_state.get("live_ts", 0.0)
+    auto_ref = st.session_state.get("auto_refresh_live", False)
     intervalo = st.session_state.get("intervalo_live", 1)
+    valor_inv = st.session_state.get("valor_invest", 100.0)
 
     # ── Auto-refresh ──────────────────────────────────────────────────────
     if auto_ref and live_ts > 0:
@@ -891,111 +971,77 @@ def _render_live():
 
     if dados is None:
         st.info("Clique em **⚡ Buscar Live** na sidebar para iniciar.")
-        st.caption(
-            "O detector monitora jogos de futebol ao vivo e alerta quando as odds de "
-            "Casa e Fora se cruzam — o momento de maior equilíbrio e maior chance de divergência."
-        )
-        return
-
-    if not dados:
+        st.caption("🕐 Pico: Futebol 14h–22h | NBA 21h–04h | Tênis varia")
+        # Mostrar calculadora mesmo sem dados
+    elif not dados:
         st.warning("Nenhum sinal de crossing odds no momento.")
         st.caption("🕐 Horários de pico: 14h–22h (fins de semana têm mais jogos)")
-        return
+    else:
+        cruzados  = [d for d in dados if d["cruzado"]]
+        cruzando  = [d for d in dados if d["cruzando"] and not d["cruzado"]]
+        monitorar = [d for d in dados if not d["cruzado"] and not d["cruzando"]]
 
-    cruzados  = [d for d in dados if d["cruzado"]]
-    cruzando  = [d for d in dados if d["cruzando"] and not d["cruzado"]]
-    monitorar = [d for d in dados if not d["cruzado"] and not d["cruzando"]]
+        # ── Métricas ──────────────────────────────────────────────────────
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🔴 Jogos ao vivo",  len({d["jogo"] for d in dados}))
+        m2.metric("🎯 Já cruzaram",    len(cruzados))
+        m3.metric("⚡ Cruzando agora", len(cruzando))
+        m4.metric("📊 Monitorar",      len(monitorar))
 
-    # ── Métricas ──────────────────────────────────────────────────────────
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("🔴 Jogos ao vivo",  len({d["jogo"] for d in dados}))
-    m2.metric("🎯 Já cruzaram",    len(cruzados))
-    m3.metric("⚡ Cruzando agora", len(cruzando))
-    m4.metric("📊 Monitorar",      len(monitorar))
+        if cruzados:
+            st.error(f"🎯 {len(cruzados)} odd(s) já cruzaram!")
+        if cruzando:
+            st.warning(f"⚡ {len(cruzando)} odd(s) prestes a cruzar!")
 
-    if cruzados:
-        st.error(f"🎯 {len(cruzados)} odd(s) já cruzaram — verifique o sinal de entrada!")
-    if cruzando:
-        st.warning(f"⚡ {len(cruzando)} odd(s) prestes a cruzar — fique de olho!")
+        st.divider()
 
-    st.divider()
+        # ── Tabela ────────────────────────────────────────────────────────
+        rows = []
+        for d in dados:
+            rows.append({
+                "Status":      d["status"],
+                "Jogo":        d["jogo"],
+                "Liga":        d["liga"],
+                "Mercado":     d["mercado"],
+                "Casa Odd":    d["odd_home"],
+                "Fora Odd":    d["odd_away"],
+                "Diferença":   d["diff"],
+                "Prob Casa":   f"{d['prob_home']}%",
+                "Prob Fora":   f"{d['prob_away']}%",
+                "Sinal":       d["apostar_em"],
+            })
 
-    # ── Explicação rápida ─────────────────────────────────────────────────
-    with st.expander("ℹ️ O que são Crossing Odds?", expanded=False):
-        st.markdown("""
-**Crossing Odds** é quando as odds de Casa e Fora se invertem durante o jogo.
+        df = pd.DataFrame(rows)
 
-**Exemplo:**
-- Início: Casa @ 1.80 / Fora @ 2.20 *(Casa favorita)*
-- Durante o jogo: Casa @ 2.05 / Fora @ 2.05 ← **cruzamento**
-- Depois: Casa @ 2.40 / Fora @ 1.75 *(Fora virou favorita)*
+        def _cor_status_live(val):
+            if "Cruzado"  in str(val): return "color:#2ecc71;font-weight:bold"
+            if "Cruzando" in str(val): return "color:#e67e22;font-weight:500"
+            return ""
 
-**Por que importa?**
-- No ponto de cruzamento as odds ficam mais equilibradas
-- Casas diferentes ajustam em momentos diferentes → janela de divergência
-- É o melhor momento para identificar value bet ou arb entre casas
+        def _cor_diff_live(val):
+            if isinstance(val, float):
+                if val < 0.05: return "color:#2ecc71;font-weight:bold"
+                if val < 0.15: return "color:#e67e22"
+            return ""
 
-**Status:**
-- 🎯 **Cruzado** — as odds já se inverteram (Fora < Casa)
-- ⚡ **Cruzando** — diferença menor que o threshold configurado
-- 📊 **Monitorar** — ainda longe do cruzamento mas vale acompanhar
-        """)
+        styled = (
+            df.style
+            .map(_cor_status_live, subset=["Status"])
+            .map(_cor_diff_live,   subset=["Diferença"])
+            .format({"Casa Odd": "{:.3f}", "Fora Odd": "{:.3f}", "Diferença": "{:.3f}"})
+        )
+        st.dataframe(styled, width="stretch", hide_index=True)
+        st.divider()
 
-    # ── Tabela ────────────────────────────────────────────────────────────
-    rows = []
-    for d in dados:
-        rows.append({
-            "Status":     d["status"],
-            "Jogo":       d["jogo"],
-            "Liga":       d["liga"],
-            "Mercado":    d["mercado"],
-            "Casa Odd":   d["odd_home"],
-            "Fora Odd":   d["odd_away"],
-            "Diferença":  d["diff"],
-            "Prob Casa":  f"{d['prob_home']}%",
-            "Prob Fora":  f"{d['prob_away']}%",
-            "Sinal":      d["apostar_em"],
-        })
-
-    df = pd.DataFrame(rows)
-
-    def _cor_status(val):
-        if "Cruzado"  in str(val): return "color:#2ecc71;font-weight:bold"
-        if "Cruzando" in str(val): return "color:#e67e22;font-weight:500"
-        return ""
-
-    def _cor_diff(val):
-        if isinstance(val, float):
-            if val < 0.05: return "color:#2ecc71;font-weight:bold"
-            if val < 0.15: return "color:#e67e22"
-        return ""
-
-    styled = (
-        df.style
-        .map(_cor_status, subset=["Status"])
-        .map(_cor_diff,   subset=["Diferença"])
-        .format({"Casa Odd": "{:.3f}", "Fora Odd": "{:.3f}", "Diferença": "{:.3f}"})
-    )
-    st.dataframe(styled, width="stretch", hide_index=True)
-
-    # ── Expanders detalhados ──────────────────────────────────────────────
-    prioritarios = cruzados + cruzando
-    # ── Calculadora Automática — todos os jogos ─────────────────────────────
-    st.divider()
+    # ── Calculadora Automática de Cruzamento ──────────────────────────────
     st.markdown("### 🧮 Calculadora de Cruzamento")
-    st.caption(
-        "Odds cruzando em 2.00 = lucro zero. "
-        "Use o filtro abaixo para monitorar só cruzamentos rentáveis."
-    )
 
     cv1, cv2 = st.columns([2, 1])
     odd_min_cruzamento = cv1.slider(
         "🎯 Odd mínima do cruzamento",
         min_value=1.80, max_value=4.00, value=2.40, step=0.05,
-        help=(
-            "Mostra só jogos onde AMBAS as odds estão acima deste valor.\n"
-            "2.40 = lucro ~16% | 2.70 = lucro ~26% | 3.00 = lucro ~33%"
-        ),
+        help="Mostra só jogos onde AMBAS as odds estão acima deste valor. "
+             "2.40 = lucro ~16% | 2.70 = lucro ~26% | 3.00 = lucro ~33%",
         key="odd_min_cruzamento_slider",
     )
     val_calc = cv2.number_input(
@@ -1008,127 +1054,117 @@ def _render_live():
     st.session_state["valor_invest"] = val_calc
 
     if not dados:
-        st.info("Clique em **⚡ Buscar Live** para carregar os jogos ao vivo.")
-    else:
-        # Filtrar: ambas as odds acima do threshold de cruzamento
-        dados_filtrados = [
-            d for d in dados
-            if d["odd_home"] >= odd_min_cruzamento and d["odd_away"] >= odd_min_cruzamento
-        ]
+        st.info("Busque os jogos ao vivo para ver a calculadora em ação.")
+        return
 
-        if not dados_filtrados:
-            lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
-            st.info(
-                f"Nenhum jogo com ambas as odds ≥ {odd_min_cruzamento:.2f} no momento. "
-                f"(Cruzamento nessa faixa renderia ~{lucro_est}% de lucro) "
-                "Reduza o threshold ou aguarde as odds se moverem."
-            )
-        else:
-            lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
-            st.caption(
-                f"{len(dados_filtrados)} jogo(s) com odds ≥ {odd_min_cruzamento:.2f} "
-                f"— cruzamento nessa faixa rende ~{lucro_est}% de lucro"
-            )
+    dados_filtrados = [
+        d for d in dados
+        if d["odd_home"] >= odd_min_cruzamento and d["odd_away"] >= odd_min_cruzamento
+    ]
 
-        # Ordenar: cruzados primeiro, depois cruzando, depois monitorar
-        ordem = {"🎯 Cruzado": 0, "⚡ Cruzando": 1, "📊 Monitorar": 2}
-        dados_ord = sorted(
-            dados_filtrados if dados_filtrados else dados,
-            key=lambda d: (ordem.get(d["status"], 3), d["diff"])
+    if not dados_filtrados:
+        lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
+        st.info(
+            f"Nenhum jogo com ambas as odds ≥ {odd_min_cruzamento:.2f}. "
+            f"Cruzamento nessa faixa renderia ~{lucro_est}% de lucro. "
+            "Reduza o threshold ou aguarde as odds se moverem."
         )
+        return
 
-        for d in dados_ord:
-            odd_h = d["odd_home"]
-            odd_a = d["odd_away"]
+    lucro_est = round((1 - 2/odd_min_cruzamento) * 100, 1)
+    st.caption(
+        f"{len(dados_filtrados)} jogo(s) com odds ≥ {odd_min_cruzamento:.2f} "
+        f"— cruzamento nessa faixa rende ~{lucro_est}% de lucro"
+    )
 
-            soma_p    = (1/odd_h) + (1/odd_a)
-            margem_c  = round((soma_p - 1) * 100, 2)
-            eh_arb_c  = soma_p < 1.0
-            diff_c    = round(abs(odd_h - odd_a), 3)
+    # Ordenar: cruzados primeiro → odds mais altas primeiro
+    ordem = {"🎯 Cruzado": 0, "⚡ Cruzando": 1, "📊 Monitorar": 2}
+    dados_ord = sorted(
+        dados_filtrados,
+        key=lambda d: (ordem.get(d["status"], 3), -min(d["odd_home"], d["odd_away"]))
+    )
 
-            # Stakes ótimas
-            retorno_alvo = val_calc / soma_p
-            stake_h      = round(retorno_alvo / odd_h, 2)
-            stake_a      = round(retorno_alvo / odd_a, 2)
-            total_c      = round(stake_h + stake_a, 2)
-            lucro_c      = round(retorno_alvo - total_c, 2)
-            odd_alvo_a   = round(1 / (1 - 1/odd_h), 3) if odd_h > 1 else 0
+    for d in dados_ord:
+        odd_h = d["odd_home"]
+        odd_a = d["odd_away"]
+        odd_min_par = min(odd_h, odd_a)
 
-            if eh_arb_c:        icone = "🚨"
-            elif soma_p < 1.02: icone = "🔥"
-            elif d["cruzado"]:  icone = "🎯"
-            elif d["cruzando"]: icone = "⚡"
-            else:               icone = "📊"
+        soma_p    = (1/odd_h) + (1/odd_a)
+        margem_c  = round((soma_p - 1) * 100, 2)
+        eh_arb_c  = soma_p < 1.0
+        diff_c    = round(abs(odd_h - odd_a), 3)
+        lucro_pct = round((1 - soma_p) * 100, 1)
 
-            label_exp = (
-                f"{icone} {d['jogo']} | {d['mercado']} | "
-                f"Casa {odd_h:.3f} × Fora {odd_a:.3f} | Margem {margem_c:+.2f}%"
+        retorno_alvo = val_calc / soma_p
+        stake_h      = round(retorno_alvo / odd_h, 2)
+        stake_a      = round(retorno_alvo / odd_a, 2)
+        total_c      = round(stake_h + stake_a, 2)
+        lucro_c      = round(retorno_alvo - total_c, 2)
+        odd_alvo_a   = round(1 / (1 - 1/odd_h), 3) if odd_h > 1 else 0
+
+        if eh_arb_c:                            icone = "🚨"
+        elif odd_min_par >= odd_min_cruzamento:  icone = "🔥"
+        elif odd_min_par >= 2.40:               icone = "⚡"
+        else:                                   icone = "📊"
+
+        desc_h = d.get("desc_home", "Casa")
+        desc_a = d.get("desc_away", "Fora")
+
+        label_exp = (
+            f"{icone} {d['jogo']} | {d['mercado']} | "
+            f"{odd_h:.3f} × {odd_a:.3f} | "
+            f"Lucro potencial ~{lucro_pct:.1f}%"
+        )
+        with st.expander(label_exp, expanded=eh_arb_c or icone == "🔥"):
+            st.markdown(f"**{d['jogo']}** 🔴 — {d['liga']} — {d['mercado']}")
+
+            cm1, cm2, cm3, cm4 = st.columns(4)
+            cm1.metric(desc_h,      f"{odd_h:.3f}", f"{d['prob_home']}%")
+            cm2.metric(desc_a,      f"{odd_a:.3f}", f"{d['prob_away']}%")
+            cm3.metric("Diferença", f"{diff_c:.3f}")
+            cm4.metric("Margem",    f"{margem_c:+.2f}%",
+                       delta="✅ ARB!" if eh_arb_c else None)
+
+            df_c = pd.DataFrame([
+                {"Lado": desc_h, "Odd": odd_h, "Stake (R$)": stake_h,
+                 "Retorno (R$)": round(stake_h*odd_h,2), "Lucro (R$)": round(stake_h*odd_h-total_c,2)},
+                {"Lado": desc_a, "Odd": odd_a, "Stake (R$)": stake_a,
+                 "Retorno (R$)": round(stake_a*odd_a,2), "Lucro (R$)": round(stake_a*odd_a-total_c,2)},
+            ])
+
+            def _cor_lc(val):
+                if isinstance(val, float):
+                    if val > 0: return "color:#2ecc71;font-weight:500"
+                    if val < 0: return "color:#e74c3c"
+                return ""
+
+            st.dataframe(
+                df_c.style.map(_cor_lc, subset=["Lucro (R$)"])
+                .format({"Odd":"{:.3f}","Stake (R$)":"R$ {:.2f}",
+                         "Retorno (R$)":"R$ {:.2f}","Lucro (R$)":"R$ {:.2f}"}),
+                width="stretch", hide_index=True,
             )
-            with st.expander(label_exp, expanded=eh_arb_c or soma_p < 1.02):
-                st.markdown(f"**{d['jogo']}** 🔴 — {d['liga']} — {d['mercado']}")
 
-                desc_h = d.get("desc_home", "Casa (Home)")
-                desc_a = d.get("desc_away", "Fora (Away)")
-                cm1, cm2, cm3, cm4 = st.columns(4)
-                cm1.metric(desc_h,      f"{odd_h:.3f}", f"{d['prob_home']}%")
-                cm2.metric(desc_a,      f"{odd_a:.3f}", f"{d['prob_away']}%")
-                cm3.metric("Diferença", f"{diff_c:.3f}")
-                cm4.metric("Margem",    f"{margem_c:+.2f}%",
-                           delta="✅ ARB!" if eh_arb_c else None)
-
-                df_c = pd.DataFrame([
-                    {
-                        "Lado":         desc_h,
-                        "Odd":          odd_h,
-                        "Stake (R$)":   stake_h,
-                        "Retorno (R$)": round(stake_h * odd_h, 2),
-                        "Lucro (R$)":   round(stake_h * odd_h - total_c, 2),
-                    },
-                    {
-                        "Lado":         desc_a,
-                        "Odd":          odd_a,
-                        "Stake (R$)":   stake_a,
-                        "Retorno (R$)": round(stake_a * odd_a, 2),
-                        "Lucro (R$)":   round(stake_a * odd_a - total_c, 2),
-                    },
-                ])
-
-                def _cor_lc(val):
-                    if isinstance(val, float):
-                        if val > 0: return "color:#2ecc71;font-weight:500"
-                        if val < 0: return "color:#e74c3c"
-                    return ""
-
-                st.dataframe(
-                    df_c.style
-                    .map(_cor_lc, subset=["Lucro (R$)"])
-                    .format({"Odd": "{:.3f}", "Stake (R$)": "R$ {:.2f}",
-                             "Retorno (R$)": "R$ {:.2f}", "Lucro (R$)": "R$ {:.2f}"}),
-                    width="stretch", hide_index=True,
+            if eh_arb_c:
+                st.success(
+                    f"✅ ARB CONFIRMADA — Lucro garantido: R$ {lucro_c:.2f} "
+                    f"com R$ {total_c:.2f} investidos."
+                )
+            elif d["cruzado"] or d["cruzando"]:
+                falta = round(odd_alvo_a - odd_a, 3)
+                st.warning(
+                    f"⚡ Falta {margem_c:.2f}% para arb. "
+                    f"Fora precisaria ≥ {odd_alvo_a:.3f} (falta {falta:.3f})."
+                )
+            else:
+                falta = round(odd_alvo_a - odd_a, 3)
+                st.info(
+                    f"📊 Monitorando — falta {margem_c:.2f}% para arb "
+                    f"(Fora precisa de ≥ {odd_alvo_a:.3f}, falta {falta:.3f})."
                 )
 
-                if eh_arb_c:
-                    st.success(
-                        f"✅ ARB CONFIRMADA — Lucro garantido: R$ {lucro_c:.2f} "
-                        f"com R$ {total_c:.2f} investidos (qualquer resultado)."
-                    )
-                elif d["cruzado"] or d["cruzando"]:
-                    falta = round(odd_alvo_a - odd_a, 3)
-                    st.warning(
-                        f"⚡ Falta {margem_c:.2f}% para arb. "
-                        f"Fora precisaria ≥ {odd_alvo_a:.3f} "
-                        f"(atual {odd_a:.3f} — falta {falta:.3f})."
-                    )
-                else:
-                    falta = round(odd_alvo_a - odd_a, 3)
-                    st.info(
-                        f"📊 Monitorando — margem {margem_c:.2f}%. "
-                        f"Fora precisaria ≥ {odd_alvo_a:.3f} para arb "
-                        f"(falta {falta:.3f})."
-                    )
-
-                if d.get("link"):
-                    st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
+            if d.get("link"):
+                st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
 # ---------------------------------------------------------------------------
 # Layout principal
