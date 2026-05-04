@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 API_KEY: str = _st_key or os.getenv("API_KEY", "")
 BASE_URL: str = "https://api.odds-api.io/v3"
-BOOKMAKERS: str = "Bet365,Betano"
+BOOKMAKERS: str = "Bet365,Betano BR"
 
 MAX_EVENTOS: int = 30
 LOTE_ODDS: int = 10
@@ -538,8 +538,8 @@ def processar_value_bets(
             return (url
                 .replace("https://www.bet365.com", "https://www.bet365.bet.br")
                 .replace("https://bet365.com",     "https://www.bet365.bet.br")
-                .replace("https://www.betano.com",  "https://www.betano.bet.br")
-                .replace("https://betano.com",      "https://www.betano.bet.br"))
+                .replace("https://www.Betano.com",  "https://www.Betano.bet.br")
+                .replace("https://Betano.de.com",      "https://www.Betano.bet.br"))
         link_vb = _fix_link(vb.get("bookmakerOdds", {}).get("href", ""))
 
         chave = f"{home} x {away} | {tipo} | {bookmaker} | vb"
@@ -632,7 +632,7 @@ def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def get_dropping_odds(
-    sport: str = "football",
+    sport: str = ("football", "basketball"),
     min_drop_pct: float = 5.0,
     time_window: str = "opening",
 ) -> dict[int, dict]:
@@ -724,6 +724,7 @@ def rodar_sistema(
 
     # A. Value bets (filtradas por modo após processar)
     vb_raw = get_value_bets("Bet365")
+    vb_raw = get_value_bets("Betano BR")
     oportunidades_vb_todos = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos, modo=modo)
 
     LIGAS_NBA_NOMES = {"USA - NBA", "NBA"}
@@ -814,7 +815,7 @@ def rodar_sistema(
         event_id: int = jogo.get("id", 0)
         liga: str = jogo.get("league", {}).get("name", "")
         horario: str = _fmt_horario(jogo.get("date", ""))
-        # Links diretos por casa: {"Bet365": "https://...", "Betano": "https://..."}
+        # Links diretos por casa: {"Bet365": "https://...", "Betano BR": "https://..."}
         urls_jogo: dict = jogo.get("urls", {})
 
         # Poisson com médias reais de gols via stats históricas.
@@ -845,8 +846,9 @@ def rodar_sistema(
                 link = (raw_link
                     .replace("https://www.bet365.com", "https://www.bet365.bet.br")
                     .replace("https://bet365.com",     "https://www.bet365.bet.br")
-                    .replace("https://www.betano.com",  "https://www.betano.bet.br")
-                    .replace("https://betano.com",      "https://www.betano.bet.br"))
+                    .replace("https://www.Betano.com",  "https://www.Betano.bet.br")
+                    .replace("https://Betano.com",      "https://www.Betano.bet.br")
+                    .replace("//Betano.de",             "https://www.Betano.bet.br"))
 
                 drop_sinal = bool(drop_info and drop_info.get("market") == market_name)
 
@@ -1038,7 +1040,7 @@ def montar_multipla(resultados: list[dict], banca: float) -> dict:
     }
 
 # ---------------------------------------------------------------------------
-# Comparação de odds Bet365 x Betano
+# Comparação de odds Bet365 x Betano BR
 # ---------------------------------------------------------------------------
 
 
@@ -1050,14 +1052,14 @@ def _safe_float(val, default=0.0):
         return default
 
 
-def _corrigir_link_betano(href: str) -> str:
-    """Converte links Betano para domínio brasileiro."""
+def _corrigir_link_Betano_BR(href: str) -> str:
+    """Converte links Betano BR para domínio brasileiro."""
     return (
         href
-        .replace("www.betano.de", "betano.bet.br")
-        .replace("www.betano.com", "betano.bet.br")
-        .replace("//betano.de", "//betano.bet.br")
-        .replace("//betano.com", "//betano.bet.br")
+        .replace("www.Betano.de", "Betano.BR.bet.br")
+        .replace("www.Betano.com", "Betano.bet.br")
+        .replace("//Betano.de", "//Betano.bet.br")
+        .replace("//Betano.com", "//Betano.bet.br")
     )
 
 
@@ -1066,7 +1068,7 @@ def buscar_comparacao_odds(
     margem_max: float = 5.0,
 ) -> list[dict]:
     """
-    Cruza value bets de Bet365 e Betano pelo mesmo eventId + market + lado.
+    Cruza value bets de Bet365 e Betano BR pelo mesmo eventId + market + lado.
     Calcula a margem da casa (soma das probs implícitas) e a divergência.
 
     margem_max: filtra só linhas onde a soma das probs < (100 + margem_max)%.
@@ -1084,11 +1086,11 @@ def buscar_comparacao_odds(
 
     # Buscar value bets das duas casas
     vb_b365   = get_value_bets("Bet365")
-    vb_betano = get_value_bets("Betano")
+    vb_Betano_BR = get_value_bets("Betano BR")
 
-    # Indexar Betano por (eventId, market, lado) para lookup O(1)
-    idx_betano: dict[tuple, dict] = {}
-    for vb in vb_betano:
+    # Indexar Betano BR por (eventId, market, lado) para lookup O(1)
+    idx_Betano_BR: dict[tuple, dict] = {}
+    for vb in vb_Betano_BR:
         esp = vb.get("event", {}).get("sport", "").lower()
         if esp not in ESPORTES_SET:
             continue
@@ -1097,7 +1099,7 @@ def buscar_comparacao_odds(
             vb.get("market", {}).get("name", ""),
             vb.get("betSide", ""),
         )
-        idx_betano[chave] = vb
+        idx_Betano_BR[chave] = vb
 
     # Cruzar com Bet365
     resultado: list[dict] = []
@@ -1114,7 +1116,7 @@ def buscar_comparacao_odds(
         linha       = vb.get("market", {}).get("hdp")
 
         # Para ML de futebol há 3 lados (home/draw/away).
-        # lado_oposto é usado para buscar a Betano no lado complementar.
+        # lado_oposto é usado para buscar a Betano BR no lado complementar.
         # Para draw, usamos 'home' como referência de comparação.
         bk_odds  = vb.get("bookmakerOdds", {})
         mkt_odds = vb.get("market", {})
@@ -1142,25 +1144,25 @@ def buscar_comparacao_odds(
             if _safe_float(bk_odds.get(l)) > 1
         )
 
-        # Procurar o mesmo mercado + lado oposto na Betano
+        # Procurar o mesmo mercado + lado oposto na Betano BR
         chave_op = (event_id, market_name, lado_oposto)
-        vb_betano_op = idx_betano.get(chave_op)
+        vb_Betano_BR_op = idx_Betano_BR.get(chave_op)
 
-        if vb_betano_op:
-            # Betano tem value bet no lado oposto — comparação direta
-            odd_betano_op = _safe_float(vb_betano_op.get("bookmakerOdds", {}).get(lado_oposto))
-            odd_betano_vb = _safe_float(vb_betano_op.get("bookmakerOdds", {}).get(bet_side))
-            link_betano = _corrigir_link_betano(vb_betano_op.get("bookmakerOdds", {}).get("href", ""))
+        if vb_Betano_BR_op:
+            # Betano BR tem value bet no lado oposto — comparação direta
+            odd_Betano_BR_op = _safe_float(vb_Betano_BR_op.get("bookmakerOdds", {}).get(lado_oposto))
+            odd_Betano_BR_vb = _safe_float(vb_Betano_BR_op.get("bookmakerOdds", {}).get(bet_side))
+            link_Betano_BR = _corrigir_link_Betano_BR(vb_Betano_BR_op.get("bookmakerOdds", {}).get("href", ""))
         else:
-            # Betano não tem value bet, mas pode ter odd no mesmo payload de odds/multi
+            # Betano BR não tem value bet, mas pode ter odd no mesmo payload de odds/multi
             # Usamos a odd da Bet365 como referência para o lado oposto
-            odd_betano_op = 0.0
-            odd_betano_vb = 0.0
-            link_betano = ""
+            odd_Betano_BR_op = 0.0
+            odd_Betano_BR_vb = 0.0
+            link_Betano_BR = ""
 
         # Melhor odd de cada lado entre as duas casas
-        melhor_vb = max(odd_b365_vb, odd_betano_vb) if odd_betano_vb > 1 else odd_b365_vb
-        melhor_op = max(odd_b365_op, odd_betano_op) if odd_betano_op > 1 else odd_b365_op
+        melhor_vb = max(odd_b365_vb, odd_Betano_BR_vb) if odd_Betano_BR_vb > 1 else odd_b365_vb
+        melhor_op = max(odd_b365_op, odd_Betano_BR_op) if odd_Betano_BR_op > 1 else odd_b365_op
 
         if melhor_vb <= 1 or melhor_op <= 1:
             continue
@@ -1203,9 +1205,9 @@ def buscar_comparacao_odds(
             # Odds Bet365
             "odd_b365_vb":  round(odd_b365_vb, 3),
             "odd_b365_op":  round(odd_b365_op, 3),
-            # Odds Betano
-            "odd_betano_vb": round(odd_betano_vb, 3) if odd_betano_vb > 1 else None,
-            "odd_betano_op": round(odd_betano_op, 3) if odd_betano_op > 1 else None,
+            # Odds Betano BR
+            "odd_Betano_BR_vb": round(odd_Betano_BR_vb, 3) if odd_Betano_BR_vb > 1 else None,
+            "odd_Betano_BR_op": round(odd_Betano_BR_op, 3) if odd_Betano_BR_op > 1 else None,
             # Melhor odd de cada lado
             "melhor_vb":    round(melhor_vb, 3),
             "melhor_op":    round(melhor_op, 3),
@@ -1214,7 +1216,7 @@ def buscar_comparacao_odds(
             "eh_arb":       margem < 100.0,
             # Links
             "link_b365":    link_b365,
-            "link_betano":  link_betano,
+            "link_Betano_BR":  link_Betano_BR,
         })
 
     # Ordenar por data/horário e depois por margem dentro do mesmo horário
@@ -1231,7 +1233,7 @@ def buscar_comparacao_odds(
 # ---------------------------------------------------------------------------
 
 ESPORTES_LIVE: list[str] = ["football", "basketball"]  # só futebol tem odds ao vivo na API atual
-MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals", "Points O/U","Rebounds O/U","Assists O/U", "Player Points Milestones","Player Rebounds Milestones", "Player Assists Milestones","Player Threes Milestones"]
+MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals"]
 MAX_EVENTOS_LIVE: int = 20
 
 
@@ -1312,7 +1314,7 @@ def buscar_crossing_odds(
         horario = _fmt_horario(jogo.get("date", ""))
         urls_jogo = jogo.get("urls", {})
         link = (
-            urls_jogo.get("Bet365", "")
+            urls_jogo.get("Bet365", "Betano BR")
             .replace("www.bet365.com", "bet365.bet.br")
             .replace("//bet365.com", "//bet365.bet.br")
         )
@@ -1321,7 +1323,7 @@ def buscar_crossing_odds(
 
         for casa_raw, markets in bookmakers.items():
             casa_base = casa_raw.split(" ")[0]
-            if casa_base not in ("Bet365", "Betano"):
+            if casa_base not in ("Bet365", "Betano BR"):
                 continue
 
             for market in markets:
