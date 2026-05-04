@@ -1231,7 +1231,7 @@ def buscar_comparacao_odds(
 # ---------------------------------------------------------------------------
 
 ESPORTES_LIVE: list[str] = ["football", "basketball"]  # só futebol tem odds ao vivo na API atual
-MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals"]
+MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals", "Points O/U","Rebounds O/U","Assists O/U", "Player Points Milestones","Player Rebounds Milestones", "Player Assists Milestones","Player Threes Milestones"]
 MAX_EVENTOS_LIVE: int = 20
 
 
@@ -1296,7 +1296,7 @@ def buscar_crossing_odds(
     mercados_set = set(mercados)
 
     # 1. Eventos ao vivo de futebol
-    eventos = get_eventos_live(["football"])
+    eventos = get_eventos_live(["football", "basketball"])
     if not eventos:
         return []
 
