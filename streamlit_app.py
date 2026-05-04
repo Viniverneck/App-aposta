@@ -54,13 +54,13 @@ st.session_state["modo_compacto"] = COMPACTO
 
 
 # Modo compacto — menos dados, mais leve para iPad
-COMPACTO = st.sidebar.toggle(
-    "📱 Modo compacto",
-    value=st.session_state.get("modo_compacto", False),
-    help="Reduz dados exibidos. Recomendado para iPad e conexões lentas.",
-    key="modo_compacto_toggle",
-)
-st.session_state["modo_compacto"] = COMPACTO
+#COMPACTO = st.sidebar.toggle(
+#    "📱 Modo compacto",
+   # value=st.session_state.get("modo_compacto", False),
+   # help="Reduz dados exibidos. Recomendado para iPad e conexões lentas.",
+    #key="modo_compacto_toggle",
+#)
+#st.session_state["modo_compacto"] = COMPACTO
 
 
 # ---------------------------------------------------------------------------
