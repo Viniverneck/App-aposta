@@ -1230,7 +1230,7 @@ def buscar_comparacao_odds(
 # Útil como sinal de timing mesmo com só uma casa disponível.
 # ---------------------------------------------------------------------------
 
-ESPORTES_LIVE: list[str] = ["football"]  # só futebol tem odds ao vivo na API atual
+ESPORTES_LIVE: list[str] = ["football", "basketball"]  # só futebol tem odds ao vivo na API atual
 MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals"]
 MAX_EVENTOS_LIVE: int = 20
 
