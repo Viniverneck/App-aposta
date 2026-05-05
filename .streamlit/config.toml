@@ -1,4 +1,2 @@
-toml
-
 [server]
 port = 8080
