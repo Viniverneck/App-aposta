@@ -319,8 +319,8 @@ with st.sidebar:
     st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Totals", "Over/Under"],
-        default=["ML", "Totals", "Over/Under"],
+        ["ML", "Totals", "Over/Under", "Points O/U", "Rebounds O/U", "Assists O/U"],
+        default=["ML", "Totals", "Over/Under", "Points O/U", "Rebounds O/U", "Assists O/U"],
         label_visibility="collapsed",
     )
     threshold_live = st.slider(
@@ -446,7 +446,7 @@ if buscar_live:
     with st.spinner("Buscando crossing odds ao vivo..."):
         st.session_state["live_dados"] = buscar_crossing_odds(
             threshold=threshold_live,
-            mercados=mkt_live or ["ML","Totals", "Over/Under"],
+            mercados=mkt_live or ["ML", "Totals", "Over/Under", "Points O/U", "Rebounds O/U", "Assists O/U"],
         )
         st.session_state["live_ts"]       = time.time()
         st.session_state["mkt_live_cache"]      = mkt_live
@@ -1001,7 +1001,7 @@ def _render_live():
             with st.spinner("Atualizando crossing odds..."):
                 st.session_state["live_dados"] = buscar_crossing_odds(
                     threshold=st.session_state.get("threshold_live_cache", 0.15),
-                    mercados=st.session_state.get("mkt_live_cache", ["ML","Totals"]),
+                    mercados=st.session_state.get("mkt_live_cache", ["ML", "Totals", "Over/Under", "Points O/U", "Rebounds O/U", "Assists O/U"]),
                 )
                 st.session_state["live_ts"] = time.time()
             st.rerun()
