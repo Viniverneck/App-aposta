@@ -1,40 +1,3 @@
-import streamlit as st
-import pandas as pd
-import time
-from datetime import datetime, timezone
-from main_engine import (
-    buscar_comparacao_odds,
-    buscar_crossing_odds,
-    get_eventos_live,
-    rodar_sistema,
-    montar_multipla,
-    get_arbitrage,
-    processar_arbitrage,
-    CACHE_TTL_HISTORICO,
-    CACHE_TTL_VALUE_BETS,
-    LIGAS_PERMITIDAS,
-    LIGA_ESPORTE,
-)
-from stats_historicas import buscar_stats_ligas
-from telegram_alert import alertar_arbs, testar_conexao
-
-# ---------------------------------------------------------------------------
-# Cache
-# ---------------------------------------------------------------------------
-
-@st.cache_data(ttl=CACHE_TTL_HISTORICO, show_spinner=False)
-def _cached_stats_ligas() -> dict:
-    return buscar_stats_ligas()
-
-@st.cache_data(ttl=CACHE_TTL_VALUE_BETS, show_spinner=False)
-def _cached_rodar(modo: str, odd_min: float, odd_max: float,
-                  mercados: frozenset, stats_key: int) -> list[dict]:
-    """Cache curto para os resultados — evita rebuscar ao trocar aba."""
-    stats = _cached_stats_ligas()
-    return rodar_sistema(odd_min, odd_max, set(mercados) or None,
-                         stats_ligas=stats, modo=modo)
-
-
 # ---------------------------------------------------------------------------
 # Página
 # ---------------------------------------------------------------------------
@@ -161,6 +124,44 @@ COMPACTO = st.sidebar.toggle(
     key="modo_compacto_toggle",
 )
 st.session_state["modo_compacto"] = COMPACTO
+
+import streamlit as st
+import pandas as pd
+import time
+from datetime import datetime, timezone
+from main_engine import (
+    buscar_comparacao_odds,
+    buscar_crossing_odds,
+    get_eventos_live,
+    rodar_sistema,
+    montar_multipla,
+    get_arbitrage,
+    processar_arbitrage,
+    CACHE_TTL_HISTORICO,
+    CACHE_TTL_VALUE_BETS,
+    LIGAS_PERMITIDAS,
+    LIGA_ESPORTE,
+)
+from stats_historicas import buscar_stats_ligas
+from telegram_alert import alertar_arbs, testar_conexao
+
+# ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=CACHE_TTL_HISTORICO, show_spinner=False)
+def _cached_stats_ligas() -> dict:
+    return buscar_stats_ligas()
+
+@st.cache_data(ttl=CACHE_TTL_VALUE_BETS, show_spinner=False)
+def _cached_rodar(modo: str, odd_min: float, odd_max: float,
+                  mercados: frozenset, stats_key: int) -> list[dict]:
+    """Cache curto para os resultados — evita rebuscar ao trocar aba."""
+    stats = _cached_stats_ligas()
+    return rodar_sistema(odd_min, odd_max, set(mercados) or None,
+                         stats_ligas=stats, modo=modo)
+
+
 
 # ---------------------------------------------------------------------------
 # Session state
