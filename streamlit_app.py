@@ -1,5 +1,4 @@
 import streamlit as st
-from fastapi import FastAPI
 import uvicorn as uv
 import pandas as pd
 import time
