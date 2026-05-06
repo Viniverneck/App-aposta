@@ -1,5 +1,4 @@
-import streamlit as st
-import uvicorn as uv
+import streamlit as s
 import pandas as pd
 import time
 from datetime import datetime, timezone
