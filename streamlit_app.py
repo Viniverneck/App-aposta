@@ -734,7 +734,7 @@ def _cor_data(horario: str) -> str:
         if agora_br.day == dia and agora_br.month == mes:
             return "background-color:#1a3a1a;color:#2ecc71;font-weight:500"
         if agora_br.day + 1 == dia and agora_br.month == mes:
-            return "background-color:#3a2a00;color:#f0c040"
+           return "background-color:#3a2a00;color:#f0c040"
     except Exception:
         pass
     return ""
