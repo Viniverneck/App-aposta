@@ -635,10 +635,10 @@ def _render_nba():
             st.warning("Nenhuma oportunidade NBA encontrada.")
         else:
             df = (
-                pd.DataFrame(res),
+                pd.DataFrame(res)
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5)
-                .reset_index(drop=True)
+                .reset_index(drop=True),
             )
             m1,m2,m3,m4 = st.columns(4)
             m1.metric("Picks",     len(df))
