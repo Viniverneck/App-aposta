@@ -635,7 +635,7 @@ def _render_nba():
             st.warning("Nenhuma oportunidade NBA encontrada.")
         else:
             df = (
-                pd.DataFrame(res)
+              pd.DataFrame(res)
                 #.assign(casa=lambda x: x["casa"])
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5)
