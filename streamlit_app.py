@@ -842,6 +842,33 @@ def _render_comparacao():
         },
         width="stretch", hide_index=True,
     )
+    st.dataframe(
+                df_c.style.map(_cor_lc, subset=["Lucro (R$)"])
+                .format({"Odd":"{:.3f}","Stake (R$)":"R$ {:.2f}",
+                         "Retorno (R$)":"R$ {:.2f}","Lucro (R$)":"R$ {:.2f}"}),
+                width="stretch", hide_index=True,
+            )
+
+            if eh_arb_c:
+                st.success(
+                    f"✅ ARB CONFIRMADA — Lucro garantido: R$ {lucro_c:.2f} "
+                    f"com R$ {total_c:.2f} investidos."
+                )
+            elif d["cruzado"] or d["cruzando"]:
+                falta = round(odd_alvo_a - odd_a, 3)
+                st.warning(
+                    f"⚡ Falta {margem_c:.2f}% para arb. "
+                    f"Fora precisaria ≥ {odd_alvo_a:.3f} (falta {falta:.3f})."
+                )
+            else:
+                falta = round(odd_alvo_a - odd_a, 3)
+                st.info(
+                    f"📊 Monitorando — falta {margem_c:.2f}% para arb "
+                    f"(Fora precisa de ≥ {odd_alvo_a:.3f}, falta {falta:.3f})."
+                )
+
+            if d.get("link"):
+                st.markdown(f"🔗 [Abrir na Bet365]({d['link']})")
 
 # ---------------------------------------------------------------------------
 # MODO LIVE — Crossing Odds
