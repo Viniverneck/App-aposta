@@ -636,8 +636,8 @@ def _render_nba():
         else:
             df = (
                 pd.DataFrame(res),
-                .sort_values("ev", ascending=False),
-                .head(min(qtd_ref, 5),
+                .sort_values("ev", ascending=False)
+                .head(min(qtd_ref, 5)
                 .reset_index(drop=True)
             )
             m1,m2,m3,m4 = st.columns(4)
