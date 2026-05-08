@@ -636,7 +636,6 @@ def _render_nba():
         else:
             df = (
                 pd.DataFrame(res)
-                #.assign(casa=lambda x: x["casa"])
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5)
                 .reset_index(drop=True)
