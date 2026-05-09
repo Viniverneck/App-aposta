@@ -67,6 +67,8 @@ LIGAS_PERMITIDAS: set[str] = {
     "brazil-serie-a",
     "brazil-copa-do-brasil",
     # Basquete
+    "nba",
+    "basketball-nba",
     "usa-nba",
 }
 
@@ -801,18 +803,27 @@ def rodar_sistema(
         mercados_permitidos,
         modo=modo
     )
-    LIGAS_NBA_NOMES = {"USA - NBA", "NBA"}
-    LIGAS_FUT_NOMES = {l for l, e in LIGA_ESPORTE.items() if e == "football"}
+    LIGAS_FUT_NOMES = {
+    l for l, e in LIGA_ESPORTE.items()
+    if e == "football"
+}
 
-    if modo == "nba":
-        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") in LIGAS_NBA_NOMES]
-    elif modo == "futebol":
-        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") not in LIGAS_NBA_NOMES]
-    else:
-        oportunidades_vb = oportunidades_vb_todos
+if modo == "nba":
+    oportunidades_vb = [
+        v for v in oportunidades_vb_todos
+        if "nba" in v.get("liga", "").lower()
+    ]
 
-    logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
+elif modo == "futebol":
+    oportunidades_vb = [
+        v for v in oportunidades_vb_todos
+        if "nba" not in v.get("liga", "").lower()
+    ]
 
+else:
+    oportunidades_vb = oportunidades_vb_todos
+
+logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
     # B. Odds multi + Poisson
     
     eventos = get_events()
