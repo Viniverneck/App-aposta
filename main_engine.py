@@ -992,9 +992,10 @@ def rodar_sistema(
                                 )
                             
                                 ev = round((prob_real * odd_val) - 1, 3)
-                            if ev < EV_MINIMO:
-                                skip_ev += 1
-                                continue
+                            if modo != "nba":
+                               if ev < EV_MINIMO:
+                                  skip_ev += 1
+                                  continue
 
                             aceitos += 1
                             chave = f"{event_id}|{market_name}|{tipo}|{hdp_val}|{casa}"
@@ -1038,11 +1039,11 @@ def rodar_sistema(
 
                     tipo = _resolver_tipo(market_name, lado, linha, label)
                     prob = _prob_para_lado(market_name, lado, probs)
-                    ev = round((prob * odd) - 1, 3)
-
-                    if ev < EV_MINIMO:
-                        skip_ev += 1
-                        continue
+                    ev = round((prob * odd) - 1
+                    if modo != "nba":,
+                        if ev < EV_MINIMO:
+                           skip_ev += 1
+                           continue
 
                     aceitos += 1
                     chave = f"{event_id}|{market_name}|{tipo}|{linha}|{casa}"
