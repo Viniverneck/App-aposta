@@ -806,24 +806,24 @@ def rodar_sistema(
     LIGAS_FUT_NOMES = {
     l for l, e in LIGA_ESPORTE.items()
     if e == "football"
-}
+    }
 
-if modo == "nba":
-    oportunidades_vb = [
-        v for v in oportunidades_vb_todos
-        if "nba" in v.get("liga", "").lower()
-    ]
+    if modo == "nba":
+        oportunidades_vb = [
+            v for v in oportunidades_vb_todos
+            if "nba" in v.get("liga", "").lower()
+        ]
 
-elif modo == "futebol":
-    oportunidades_vb = [
-        v for v in oportunidades_vb_todos
-        if "nba" not in v.get("liga", "").lower()
-    ]
+    elif modo == "futebol":
+        oportunidades_vb = [
+            v for v in oportunidades_vb_todos
+            if "nba" not in v.get("liga", "").lower()
+        ]
 
-else:
-    oportunidades_vb = oportunidades_vb_todos
+    else:
+        oportunidades_vb = oportunidades_vb_todos
 
-logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
+    logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
     # B. Odds multi + Poisson
     
     eventos = get_events()
