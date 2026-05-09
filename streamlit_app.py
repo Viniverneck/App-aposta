@@ -31,6 +31,7 @@ def _nome_casa(casa: str) -> str:
     base = casa.split(" ")[0]  # remove sufixos como "(no latency)"
     return NOMES_CASAS.get(base, casa)
 
+
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ def _cached_rodar(modo: str, odd_min: float, odd_max: float,
     stats = _cached_stats_ligas()
     return rodar_sistema(odd_min, odd_max, set(mercados) or None,
                          stats_ligas=stats, modo=modo)
+
 
 # ---------------------------------------------------------------------------
 # Página
@@ -93,6 +95,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+
 # Modo compacto — menos dados, mais leve para iPad
 COMPACTO = st.sidebar.toggle(
     "📱 Modo compacto",
@@ -101,6 +105,7 @@ COMPACTO = st.sidebar.toggle(
     key="modo_compacto_toggle",
 )
 st.session_state["modo_compacto"] = COMPACTO
+
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -292,6 +297,7 @@ with st.sidebar:
         st.session_state["intervalo_live"] = intervalo_live
     buscar_live = st.button("⚡ Buscar Live", use_container_width=True, type="primary")
 
+
 # ---------------------------------------------------------------------------
 # Execução ao clicar
 # ---------------------------------------------------------------------------
@@ -439,6 +445,7 @@ def _calcular_stakes_por_meta(legs, banca_total, lucro_desejado):
         r["lucro_garantido"] = lucro_real
     return resultado
 
+
 # ---------------------------------------------------------------------------
 # Componentes reutilizáveis
 # ---------------------------------------------------------------------------
@@ -465,6 +472,7 @@ def _exibir_links_picks(df: pd.DataFrame, key: str) -> None:
             label = f"{icone} **{jogo}** — {tipo} @ {odd:.2f} _{casa}_"
             st.markdown(f"{label} → [Abrir na {casa}]({link})")
 
+
 def _tabela_ev_futebol(df: pd.DataFrame, key: str) -> None:
     RENAME = {
         "jogo":"Jogo","liga":"Liga","horario":"Horário","tipo":"Tipo",
@@ -480,6 +488,7 @@ def _tabela_ev_futebol(df: pd.DataFrame, key: str) -> None:
     st.dataframe(styled, width="stretch", hide_index=True)
     # Links abaixo da tabela
     _exibir_links_picks(df, key)
+
 
 def _tabela_ev_nba(df: pd.DataFrame, key: str) -> None:
     """Tabela NBA com colunas específicas: jogador visível quando for props."""
@@ -498,6 +507,7 @@ def _tabela_ev_nba(df: pd.DataFrame, key: str) -> None:
     # Links abaixo da tabela
     _exibir_links_picks(df, key)
 
+
 def _exibir_multipla(resultados: list[dict], banca: float, key_prefix: str) -> None:
     multi = montar_multipla(resultados, banca)
     st.subheader("🎯 Múltipla Inteligente")
@@ -515,6 +525,7 @@ def _exibir_multipla(resultados: list[dict], banca: float, key_prefix: str) -> N
         casa  = _nome_casa(p.get("casa", "").split(" ")[0])
         link_md = f" → [Apostar na {casa}]({link})" if link else ""
         st.markdown(f"{i}. **{p['jogo']}** — {p['tipo']} @ {p['odd']:.2f} _(EV: {p['ev']:+.3f})_{link_md}")
+
 
 def _exibir_arbitrage(arbs: list[dict], banca_sidebar: float, key_prefix: str) -> None:
     if not arbs:
@@ -606,6 +617,7 @@ def _exibir_arbitrage(arbs: list[dict], banca_sidebar: float, key_prefix: str) -
                 st.success(f"✅ Invest: R$ {t_inv:.2f} → Lucro garantido: R$ {l_grt:.2f} (sobra R$ {banca_calc-t_inv:.2f})")
             st.caption(f"Atualizado: {arb.get('updated_at','—')}")
 
+
 # ---------------------------------------------------------------------------
 # MODO FUTEBOL
 # ---------------------------------------------------------------------------
@@ -647,6 +659,7 @@ def _render_futebol():
             a2.metric("Maior lucro",   f"{arbs[0]['profit_pct']:.2f}%")
             a3.metric("Lucro médio",   f"{sum(a['profit_pct'] for a in arbs)/len(arbs):.2f}%")
         _exibir_arbitrage(arbs or [], banca_ref, "fut")
+
 
 # ---------------------------------------------------------------------------
 # MODO NBA
@@ -695,6 +708,7 @@ def _render_nba():
             a2.metric("Maior lucro",       f"{arbs[0]['profit_pct']:.2f}%")
             a3.metric("Lucro médio",       f"{sum(a['profit_pct'] for a in arbs)/len(arbs):.2f}%")
         _exibir_arbitrage(arbs or [], banca_ref, "nba")
+
 
 # ---------------------------------------------------------------------------
 # MODO TÊNIS
@@ -752,6 +766,7 @@ def _render_tenis():
             a3.metric("Lucro médio",   f"{sum(a['profit_pct'] for a in arbs)/len(arbs):.2f}%")
         _exibir_arbitrage(arbs or [], banca_ref, "tenis")
 
+
 # ---------------------------------------------------------------------------
 # Layout principal — toggle ⚽ / 🏀 / 🎾
 # ---------------------------------------------------------------------------
@@ -768,6 +783,7 @@ def _cor_data(horario: str) -> str:
     except Exception:
         pass
     return ""
+
 
 def _render_comparacao():
     dados     = st.session_state["comparacao"]
@@ -800,9 +816,8 @@ def _render_comparacao():
                     )
             st.rerun()
         else:
-            time.sleep(1)
-            st.rerun()
-
+            if restante % 5 == 0:
+               st.rerun()
     if dados is None:
         st.info("Configure os parâmetros em **🔍 Comparação de Odds** na sidebar e clique em **Comparar Odds**.")
         return
@@ -843,9 +858,9 @@ def _render_comparacao():
             "Bet365 VB":  d["odd_b365_vb"],
             "🔗 Bet365":  d.get("link_b365", "") or "",
             "Bet365 Op":  d["odd_b365_op"],
-            "Betano BR VB":  d["odd_betano_vb"] or "—",
-            "🔗 Betano BR":  d.get("link_betano", "") or "",
-            "Betano BR Op":  d["odd_betano_op"] or "—",
+            "Betano BR VB":  d["odd_Betano_BR_vb"] or "—",
+            "🔗 Betano BR":  d.get("link_Betano_BR", "") or "",
+            "Betano BR Op":  d["odd_Betano_BR_op"] or "—",
             "Melhor VB":  d["melhor_vb"],
             "Melhor Op":  d["melhor_op"],
             "Margem (%)": d["margem_pct"],
@@ -901,8 +916,8 @@ def _render_live():
                 st.session_state["live_ts"] = time.time()
             st.rerun()
         else:
-            time.sleep(1)
-            st.rerun()
+            if restante % 5 == 0:
+               st.rerun()
 
     if dados is None:
         st.info("Clique em **⚡ Buscar Live** na sidebar para iniciar.")
