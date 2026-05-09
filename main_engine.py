@@ -1051,7 +1051,7 @@ def rodar_sistema(
                     tipo = _resolver_tipo(market_name, lado, linha, label)
                     prob = _prob_para_lado(market_name, lado, probs)
                     ev = round((prob * odd) - 1)
-                    if modo != "nba":,
+                    if modo != "nba":
                         if ev < EV_MINIMO:
                            skip_ev += 1
                            continue
