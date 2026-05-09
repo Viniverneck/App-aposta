@@ -866,7 +866,7 @@ def _render_comparacao():
             "Margem (%)": d["margem_pct"],
         })
 
-    styled_df = (
+     styled_df = (
          df.style
          .map(_cor_margem, subset=["Margem (%)"])
      )
@@ -897,7 +897,7 @@ def _render_comparacao():
          },
          width="stretch",
          hide_index=True,
-       )
+      )
 # ---------------------------------------------------------------------------
 # MODO LIVE — Crossing Odds
 # ---------------------------------------------------------------------------
