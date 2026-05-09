@@ -884,7 +884,10 @@ def rodar_sistema(
     odds_lista = get_odds_multi(event_ids)
 
     # C. Dropping odds — só futebol (basketball retorna 403 no plano atual)
-    drop_fut  = get_dropping_odds(sport="football", min_drop_pct=5.0)
+    drop_fut = get_dropping_odds(
+    sport=["football"],
+    min_drop_pct=5.0
+)
     dropping_index = {**drop_fut}
     logger.info("Dropping odds: %d eventos", len(drop_fut))
     
@@ -902,28 +905,34 @@ def rodar_sistema(
     resultados_poisson: dict[str, dict] = {}
 
     for jogo in odds_lista:
-        bookmakers = jogo.get("bookmakers", {})
-        if not bookmakers:
-            continue
 
-        home: str = jogo.get("home", "?")
-        away: str = jogo.get("away", "?")
-        event_id: int = jogo.get("id", 0)
-        liga: str = jogo.get("league", {}).get("name", "")
-        horario: str = _fmt_horario(jogo.get("date", ""))
-        # Links diretos por casa: {"Bet365": "https://...", "Betano BR": "https://..."}
-        urls_jogo: dict = jogo.get("urls", {})
+    bookmakers = jogo.get("bookmakers", {})
+    if not bookmakers:
+        continue
 
-        # Futebol usa Poisson
+    home = jogo.get("home", "?")
+    away = jogo.get("away", "?")
+
+    # Futebol usa Poisson
     if modo != "nba":
         lam_h, lam_a = get_medias_confronto(home, away, stats_ligas)
         matriz = matriz_resultados(lam_h, lam_a)
         p_home, p_draw, p_away = prob_vitoria(matriz)
-        probs = {"home": p_home, "draw": p_draw, "away": p_away}
+
+        probs = {
+            "home": p_home,
+            "draw": p_draw,
+            "away": p_away,
+        }
+
     else:
-        probs = {"home": 0.5, "draw": 0.0, "away": 0.5}
-        
-        drop_info = dropping_index.get(event_id)
+        probs = {
+            "home": 0.5,
+            "draw": 0.0,
+            "away": 0.5,
+        }
+
+    drop_info = dropping_index.get(event_id)
 
         skip_sem_odds = skip_formato = skip_faixa = skip_ev = aceitos = 0
 
@@ -1002,10 +1011,16 @@ def rodar_sistema(
                                     ((1 / odd_val) + (1 / odd_oposta))
                                 )
                             
-                                ev = round((prob_real * odd_val) - 1, 3)
-                            if modo != "nba":
-                               if ev < EV_MINIMO:
-                                  skip_ev += 1
+                                # Remove vig da casa
+                              prob_real = (
+                              (1 / odd_val) /
+                             ((1 / odd_val) + (1 / odd_oposta))
+                                 )
+
+                              # Ajuste leve anti-vig
+                              prob_real *= 1.02
+
+                              ev = round((prob_real * odd_val) - 1, 3)
                                   continue
 
                             aceitos += 1
@@ -1050,11 +1065,15 @@ def rodar_sistema(
 
                     tipo = _resolver_tipo(market_name, lado, linha, label)
                     prob = _prob_para_lado(market_name, lado, probs)
-                    ev = round((prob * odd) - 1)
-                    if modo != "nba":
-                        if ev < EV_MINIMO:
-                           skip_ev += 1
-                           continue
+                    ev = round((prob * odd) - 1, 3)
+                    # NBA: usar probabilidade implícita ajustada
+
+                     if modo == "nba":
+
+                           prob = round((1 / odd) * 0.97, 4)
+
+                           ev = round((prob * odd) - 1, 3)
+                             continue
 
                     aceitos += 1
                     chave = f"{event_id}|{market_name}|{tipo}|{linha}|{casa}"
