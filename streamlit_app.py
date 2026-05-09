@@ -33,7 +33,7 @@ API_KEY: str = _st_key or os.getenv("API_KEY", "")
 BASE_URL: str = "https://api.odds-api.io/v3"
 BOOKMAKERS: str = "Bet365,Betano BR"
 
-MAX_EVENTOS: int = 60
+MAX_EVENTOS: int = 30
 LOTE_ODDS: int = 10
 EV_MINIMO: float = 0.02
 KELLY_MAX: float = 0.05
@@ -84,7 +84,7 @@ SLUGS_TENIS_PREFIXOS: tuple[str, ...] = ("atp-", "wta-", "challenger-", "itf-", 
 #   HISTORICO   → dados estáticos de jogos passados, 24h
 
 CACHE_TTL_EVENTOS:    int = 300    # 5 minutos
-CACHE_TTL_VALUE_BETS: int = 30     # 30 segundos
+CACHE_TTL_VALUE_BETS: int = 60     # 30 segundos
 CACHE_TTL_DROPPING:   int = 60     # 1 minuto
 CACHE_TTL_HISTORICO:  int = 86_400 # 24 horas
 # ARBITRAGE: sem cache — não defina TTL aqui, busque sempre ao vivo
