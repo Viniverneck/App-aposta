@@ -892,8 +892,9 @@ def rodar_sistema(
     logger.info("Dropping odds: %d eventos", len(drop_fut))
     
     drop_bas = get_dropping_odds(
-    sport="basketball",
+    sport=["basketball"],
     min_drop_pct=5.0
+
 )
 
     dropping_index = {
