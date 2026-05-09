@@ -866,38 +866,38 @@ def _render_comparacao():
             "Margem (%)": d["margem_pct"],
         })
 
-     styled_df = (
-         df.style
-         .map(_cor_margem, subset=["Margem (%)"])
-     )
+    styled_df = (
+        df.style
+        .map(_cor_margem, subset=["Margem (%)"])
+    )
 
-     st.dataframe(
-         styled_df,
-         column_config={
-             "Margem (%)": st.column_config.NumberColumn(
-                 "Margem (%)",
-                 format="%.2f%%"
-             ),
-             "Melhor VB": st.column_config.NumberColumn(
-                 "Melhor VB",
-                 format="%.3f"
-             ),
-             "Melhor Op": st.column_config.NumberColumn(
-                 "Melhor Op",
-                 format="%.3f"
-             ),
-             "🔗 Bet365": st.column_config.LinkColumn(
-                 "🔗 Bet365",
-                 display_text="Abrir"
-             ),
-             "🔗 Betano BR": st.column_config.LinkColumn(
-                 "🔗 Betano BR",
-                 display_text="Abrir"
-             ),
-         },
-         width="stretch",
-         hide_index=True,
-     )
+    st.dataframe(
+        styled_df,
+        column_config={
+            "Margem (%)": st.column_config.NumberColumn(
+                "Margem (%)",
+                format="%.2f%%"
+            ),
+            "Melhor VB": st.column_config.NumberColumn(
+                "Melhor VB",
+                format="%.3f"
+            ),
+            "Melhor Op": st.column_config.NumberColumn(
+                "Melhor Op",
+                format="%.3f"
+            ),
+            "🔗 Bet365": st.column_config.LinkColumn(
+                "🔗 Bet365",
+                display_text="Abrir"
+            ),
+            "🔗 Betano BR": st.column_config.LinkColumn(
+                "🔗 Betano BR",
+                display_text="Abrir"
+            ),
+        },
+        width="stretch",
+        hide_index=True,
+    )
 # ---------------------------------------------------------------------------
 # MODO LIVE — Crossing Odds
 # ---------------------------------------------------------------------------
