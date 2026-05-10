@@ -60,125 +60,40 @@ st.title("🚀 Trader PRO — Sistema Completo")
 # CSS Responsivo — adapta layout para iPad e mobile
 # ---------------------------------------------------------------------------
 st.markdown("""
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
-/* Força o Safari/WebKit a usar GPU para scroll */
-.main {
-    -webkit-transform: translateZ(0);
-    transform: translateZ(0);
-    will-change: scroll-position;
-}
-/* Evita que o Safari bloqueie o render */
-* {
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-}
-/* ── iPad / Tablet (até 1024px) ────────────────────────────────────────── */
-@media (max-width: 1024px) {
 
-    /* Sidebar mais estreita */
-    [data-testid="stSidebar"] {
-        min-width: 260px !important;
-        max-width: 280px !important;
-    }
-
-    /* Fonte levemente menor */
-    html, body, [class*="css"] {
-        font-size: 14px !important;
-    }
-
-    /* Métricas em linha — reduz altura */
-    [data-testid="stMetric"] {
-        padding: 4px 8px !important;
-    }
-
-    /* Tabelas com scroll horizontal */
-    [data-testid="stDataFrame"] {
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-    }
-
-    /* Colunas empilham em telas menores */
-    [data-testid="column"] {
-        min-width: 120px !important;
-    }
-
-    /* Botões maiores para toque */
-    .stButton > button {
-        min-height: 44px !important;
-        font-size: 15px !important;
-    }
-
-    /* Inputs maiores para toque */
-    .stNumberInput input,
-    .stSlider,
-    .stSelectSlider {
-        min-height: 40px !important;
-    }
-
-    /* Expanders com padding reduzido */
-    .streamlit-expanderHeader {
-        padding: 8px 12px !important;
-        font-size: 13px !important;
-    }
-}
-
-/* ── Mobile (até 768px) ─────────────────────────────────────────────────── */
+/* ── Mobile (até 768px) ── */
 @media (max-width: 768px) {
 
-    /* Ocultar sidebar por padrão — usar botão hambúrguer */
+    /* Ocultar sidebar por padrão */
     [data-testid="stSidebar"] {
         transform: translateX(-100%) !important;
     }
+
     [data-testid="stSidebar"][aria-expanded="true"] {
         transform: translateX(0) !important;
     }
 
-    /* Layout em coluna única */
+    /* Layout coluna única */
     [data-testid="column"] {
         width: 100% !important;
         flex: 1 1 100% !important;
     }
 
-    /* Radio de modo em coluna */
+    /* Radio vertical */
     .stRadio > div {
         flex-direction: column !important;
         gap: 4px !important;
     }
 
-    /* Tabelas com altura máxima e scroll */
+    /* Tabelas */
     [data-testid="stDataFrame"] iframe {
-        max-height: 400px !important;
-        overflow-y: auto !important;
-    }
-
-    /* Título menor */
-    h1 {
-        font-size: 1.4rem !important;
-    }
-
-    /* Métricas compactas */
-    [data-testid="stMetricValue"] {
-        font-size: 1.2rem !important;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 0.75rem !important;
+        height: 500px !important;
     }
 }
 
-/* ── Touch — melhora scroll em todos os dispositivos touch ─────────────── */
-* {
-    -webkit-tap-highlight-color: transparent;
-}
-.main .block-container {
-    -webkit-overflow-scrolling: touch !important;
-    overflow-y: auto !important;
-}
 </style>
 """, unsafe_allow_html=True)
-
 
 
 # Modo compacto — menos dados, mais leve para iPad
