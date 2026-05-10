@@ -60,38 +60,122 @@ st.title("🚀 Trader PRO — Sistema Completo")
 # CSS Responsivo — adapta layout para iPad e mobile
 # ---------------------------------------------------------------------------
 st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
+/* Força o Safari/WebKit a usar GPU para scroll */
+.main {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    will-change: scroll-position;
+}
+/* Evita que o Safari bloqueie o render */
+* {
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+}
+/* ── iPad / Tablet (até 1024px) ────────────────────────────────────────── */
+@media (max-width: 1024px) {
 
-/* ── Mobile (até 768px) ── */
+    /* Sidebar mais estreita */
+    [data-testid="stSidebar"] {
+        min-width: 260px !important;
+        max-width: 280px !important;
+    }
+
+    /* Fonte levemente menor */
+    html, body, [class*="css"] {
+        font-size: 14px !important;
+    }
+
+    /* Métricas em linha — reduz altura */
+    [data-testid="stMetric"] {
+        padding: 4px 8px !important;
+    }
+
+    /* Tabelas com scroll horizontal */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    /* Colunas empilham em telas menores */
+    [data-testid="column"] {
+        min-width: 120px !important;
+    }
+
+    /* Botões maiores para toque */
+    .stButton > button {
+        min-height: 44px !important;
+        font-size: 15px !important;
+    }
+
+    /* Inputs maiores para toque */
+    .stNumberInput input,
+    .stSlider,
+    .stSelectSlider {
+        min-height: 40px !important;
+    }
+
+    /* Expanders com padding reduzido */
+    .streamlit-expanderHeader {
+        padding: 8px 12px !important;
+        font-size: 13px !important;
+    }
+}
+
+/* ── Mobile (até 768px) ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
 
-    /* Ocultar sidebar por padrão */
+    /* Ocultar sidebar por padrão — usar botão hambúrguer */
     [data-testid="stSidebar"] {
         transform: translateX(-100%) !important;
     }
-
     [data-testid="stSidebar"][aria-expanded="true"] {
         transform: translateX(0) !important;
     }
 
-    /* Layout coluna única */
+    /* Layout em coluna única */
     [data-testid="column"] {
         width: 100% !important;
         flex: 1 1 100% !important;
     }
 
-    /* Radio vertical */
+    /* Radio de modo em coluna */
     .stRadio > div {
         flex-direction: column !important;
         gap: 4px !important;
     }
 
-    /* Tabelas */
+    /* Tabelas com altura máxima e scroll */
     [data-testid="stDataFrame"] iframe {
-        height: 500px !important;
+        max-height: 400px !important;
+        overflow-y: auto !important;
+    }
+
+    /* Título menor */
+    h1 {
+        font-size: 1.4rem !important;
+    }
+
+    /* Métricas compactas */
+    [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
     }
 }
 
+/* ── Touch — melhora scroll em todos os dispositivos touch ─────────────── */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+.main .block-container {
+    -webkit-overflow-scrolling: touch !important;
+    overflow-y: auto !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -816,8 +900,9 @@ def _render_comparacao():
                     )
             st.rerun()
         else:
-            if restante % 5 == 0:
-               st.rerun()
+            time.sleep(1)
+            st.rerun()
+
     if dados is None:
         st.info("Configure os parâmetros em **🔍 Comparação de Odds** na sidebar e clique em **Comparar Odds**.")
         return
@@ -858,46 +943,35 @@ def _render_comparacao():
             "Bet365 VB":  d["odd_b365_vb"],
             "🔗 Bet365":  d.get("link_b365", "") or "",
             "Bet365 Op":  d["odd_b365_op"],
-            "Betano BR VB":  d["odd_Betano_BR_vb"] or "—",
-            "🔗 Betano BR":  d.get("link_Betano_BR", "") or "",
-            "Betano BR Op":  d["odd_Betano_BR_op"] or "—",
+            "Betano BR VB":  d["odd_betano_vb"] or "—",
+            "🔗 Betano BR":  d.get("link_betano", "") or "",
+            "Betano BR Op":  d["odd_betano_op"] or "—",
             "Melhor VB":  d["melhor_vb"],
             "Melhor Op":  d["melhor_op"],
             "Margem (%)": d["margem_pct"],
         })
 
-    styled_df = (
-        df.style
-        .map(_cor_margem, subset=["Margem (%)"])
-    )
+    df = pd.DataFrame(rows).sort_values(["Margem (%)", "Horário"])
+
+    def _cor_margem(val):
+        if isinstance(val, float):
+            if val < 100: return "background-color:#1a4a1a;color:#2ecc71;font-weight:bold"
+            if val < 101: return "color:#e74c3c;font-weight:500"
+            if val < 102: return "color:#e67e22;font-weight:500"
+        return ""
 
     st.dataframe(
-        styled_df,
+        df,
         column_config={
-            "Margem (%)": st.column_config.NumberColumn(
-                "Margem (%)",
-                format="%.2f%%"
-            ),
-            "Melhor VB": st.column_config.NumberColumn(
-                "Melhor VB",
-                format="%.3f"
-            ),
-            "Melhor Op": st.column_config.NumberColumn(
-                "Melhor Op",
-                format="%.3f"
-            ),
-            "🔗 Bet365": st.column_config.LinkColumn(
-                "🔗 Bet365",
-                display_text="Abrir"
-            ),
-            "🔗 Betano BR": st.column_config.LinkColumn(
-                "🔗 Betano BR",
-                display_text="Abrir"
-            ),
+            "Margem (%)": st.column_config.NumberColumn("Margem (%)", format="%.2f%%"),
+            "Melhor VB":  st.column_config.NumberColumn("Melhor VB",  format="%.3f"),
+            "Melhor Op":  st.column_config.NumberColumn("Melhor Op",  format="%.3f"),
+            "🔗 Bet365":  st.column_config.LinkColumn("🔗 Bet365",  display_text="Abrir"),
+            "🔗 Betano BR":  st.column_config.LinkColumn("🔗 Betano BR",  display_text="Abrir"),
         },
-        width="stretch",
-        hide_index=True,
+        width="stretch", hide_index=True,
     )
+
 # ---------------------------------------------------------------------------
 # MODO LIVE — Crossing Odds
 # ---------------------------------------------------------------------------
@@ -927,8 +1001,8 @@ def _render_live():
                 st.session_state["live_ts"] = time.time()
             st.rerun()
         else:
-            if restante % 5 == 0:
-               st.rerun()
+            time.sleep(1)
+            st.rerun()
 
     if dados is None:
         st.info("Clique em **⚡ Buscar Live** na sidebar para iniciar.")
