@@ -892,7 +892,7 @@ def rodar_sistema(
 
                             # EV: usa prob implícita da odd (mais preciso que Poisson para props)
                             prob_impl = 1 / odd_val
-                            ev = round((prob_impl * odd_val) - 1, 3)  # sempre ~0 pela margem da casa
+                            ev = round((prob_impl * odd_val) - 1)  # sempre ~0 pela margem da casa
                             # Para props usamos a odd da casa oposta para estimar EV real
                             odd_oposta = under_val if direcao == "over" else over_val
                             if odd_oposta > 1:
@@ -946,7 +946,7 @@ def rodar_sistema(
 
                     tipo = _resolver_tipo(market_name, lado, linha, label)
                     prob = _prob_para_lado(market_name, lado, probs)
-                    ev = round((prob * odd) - 1, 3)
+                    ev = round((prob * odd) - 1)
 
                     if ev < EV_MINIMO:
                         skip_ev += 1
@@ -1022,7 +1022,7 @@ def montar_multipla(resultados: list[dict], banca: float) -> dict:
         odd_total *= p["odd"]
         prob_total *= p["prob_modelo"] / 100
 
-    ev = round((prob_total * odd_total) - 1, 3)
+    ev = round((prob_total * odd_total) - 1)
 
     kelly = 0.0
     if odd_total > 1:
