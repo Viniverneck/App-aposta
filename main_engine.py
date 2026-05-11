@@ -898,7 +898,7 @@ def rodar_sistema(
                             if odd_oposta > 1:
                                 prob_fair = 1 / odd_oposta
                                 prob_real = 1 - prob_fair  # prob implícita sem margem
-                                ev = round((prob_real * odd_val) - 1, 3)
+                                ev = round((prob_real * odd_val) - 1)
 
                             if ev < EV_MINIMO:
                                 skip_ev += 1
