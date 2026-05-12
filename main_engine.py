@@ -46,6 +46,7 @@ LIGAS_PERMITIDAS: set[str] = {
     # Futebol
     "spain-la-liga",
     "italy-serie-a",
+    "Italy-Italian-Cup",
     "england-premier-league",
     "premier-league",
     "germany-bundesliga",
@@ -61,6 +62,7 @@ LIGAS_PERMITIDAS: set[str] = {
 LIGA_ESPORTE: dict[str, str] = {
     "spain-la-liga":          "football",
     "italy-serie-a":          "football",
+    "Italy-Italian-Cup":      "football",
     "england-premier-league": "football",
     "germany-bundesliga":     "football",
     "premier-league":          "football",
