@@ -46,9 +46,7 @@ LIGAS_PERMITIDAS: set[str] = {
     # Futebol
     "spain-la-liga",
     "italy-serie-a",
-    "Italy-Italian-Cup",
     "england-premier-league",
-    "premier-league",
     "germany-bundesliga",
     "france-ligue-1",
     "uefa-champions-league",
@@ -62,10 +60,8 @@ LIGAS_PERMITIDAS: set[str] = {
 LIGA_ESPORTE: dict[str, str] = {
     "spain-la-liga":          "football",
     "italy-serie-a":          "football",
-    "Italy-Italian-Cup":      "football",
     "england-premier-league": "football",
     "germany-bundesliga":     "football",
-    "premier-league":          "football",
     "france-ligue-1":         "football",
     "uefa-champions-league":  "football",
     "brazil-serie-a":         "football",
@@ -88,7 +84,7 @@ SLUGS_TENIS_PREFIXOS: tuple[str, ...] = ("atp-", "wta-", "challenger-", "itf-", 
 #   HISTORICO   → dados estáticos de jogos passados, 24h
 
 CACHE_TTL_EVENTOS:    int = 300    # 5 minutos
-CACHE_TTL_VALUE_BETS: int = 30     # 30 segundos
+CACHE_TTL_VALUE_BETS: int = 60     # 30 segundos
 CACHE_TTL_DROPPING:   int = 60     # 1 minuto
 CACHE_TTL_HISTORICO:  int = 86_400 # 24 horas
 # ARBITRAGE: sem cache — não defina TTL aqui, busque sempre ao vivo
@@ -166,166 +162,121 @@ _MERCADOS_MILESTONE: set[str] = {
 }
 
 
-def _resolver_tipo(market_name: str, lado: str, linha: Any, label: str | None) -> str:
-    """
-    Converte market + lado em descrição clara, igual à linguagem das casas de apostas.
-    home = OVER / Mais de / Casa
-    away = UNDER / Menos de / Fora
-    draw = Empate
-    """
-    lado_l = lado.lower()
+def _resolver_tipo(
+    market_name: str,
+    bet_side: str,
+    linha=None,
+    jogador=None,
+) -> str:
 
-    if label:
-        # Limpar labels de props NBA: 'LeBron James (1) (6.5)' → só o nome
-        # Número de camisa e linha já ficam nas colunas próprias
-        label_limpo = _re.sub(r'\s*\(\d+\)\s*', ' ', label).strip()  # remove nº camisa
-        label_limpo = _re.sub(r'\s*\([\d.]+\)\s*$', '', label_limpo).strip()  # remove linha
-        return label_limpo if label_limpo else label
+    market_lower = (market_name or "").lower()
 
-    # ── ML / Moneyline ────────────────────────────────────────────────────
-    if market_name in {"ML", "Moneyline"}:
-        return {"home": "Vitória Casa", "away": "Vitória Fora", "draw": "Empate"}.get(lado_l, f"ML {lado}")
+    # =====================================================
+    # EXTRAIR JOGADOR AUTOMATICAMENTE
+    # =====================================================
 
-    # ── ML por período ────────────────────────────────────────────────────
-    if market_name == "ML HT":
-        return {"home": "Vitória Casa (1ºT)", "away": "Vitória Fora (1ºT)", "draw": "Empate (1ºT)"}.get(lado_l, f"ML HT {lado}")
-    if market_name in {"ML Q1", "ML 1Q"}:
-        return {"home": "Vitória Casa (1ºQ)", "away": "Vitória Fora (1ºQ)", "draw": "Empate (1ºQ)"}.get(lado_l, f"ML Q1 {lado}")
+    jogador_extraido = ""
 
-    # ── Totais de gols — Futebol ──────────────────────────────────────────
-    if market_name in {"Totals", "Over/Under"}:
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} gols" if linha is not None else f"{direcao} gols"
+    if "player props -" in market_lower:
 
-    if market_name == "Totals HT":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} gols (1ºT)" if linha is not None else f"{direcao} gols (1ºT)"
+        try:
+            parte = market_name.split("Player Props -", 1)[1]
 
-    # ── Escanteios ────────────────────────────────────────────────────────
-    if market_name == "Corners Totals":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} escanteios" if linha is not None else f"{direcao} escanteios"
+            if "(" in parte:
+                jogador_extraido = parte.split("(")[0].strip()
+            else:
+                jogador_extraido = parte.strip()
 
-    if market_name == "Corners Totals HT":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} escanteios (1ºT)" if linha is not None else f"{direcao} escanteios (1ºT)"
+        except Exception:
+            jogador_extraido = ""
 
-    if market_name == "Corners Spread":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap Escanteios {time}{hdp}"
+    if not jogador and jogador_extraido:
+        jogador = jogador_extraido
 
-    # ── Cartões ───────────────────────────────────────────────────────────
-    if market_name == "Bookings Spread":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap Cartões {time}{hdp}"
+    # =====================================================
+    # DIREÇÃO DA APOSTA
+    # =====================================================
 
-    # ── Spread / Handicap Asiático — Futebol ──────────────────────────────
-    if market_name == "Spread":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap {time}{hdp}"
-
-    if market_name == "Spread HT":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap {time}{hdp} (1ºT)"
-
-    # ── NBA — Totais de pontos ────────────────────────────────────────────
-    if market_name == "Totals 1Q":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} pontos (1ºQ)" if linha is not None else f"{direcao} pts (1ºQ)"
-
-    if market_name in {"Team Total Home", "Team Total Away"}:
-        time = "Casa" if "Home" in market_name else "Fora"
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} pts ({time})" if linha is not None else f"{direcao} pts ({time})"
-
-    if market_name in {"Alternative Totals", "Points O/U"}:
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} pontos" if linha is not None else f"{direcao} pontos"
-
-    # ── NBA — Stats de jogadores ──────────────────────────────────────────
-    _NBA_STATS = {
-        "Rebounds O/U":   "Rebotes",
-        "Assists O/U":    "Assistências",
-        "Steals O/U":     "Roubos de bola",
-        "Blocks O/U":     "Bloqueios",
-        "Field Goals Made O/U": "Cestas convertidas",
-        "Threes Made O/U":      "Cestas de 3 pts",
+    side_map = {
+        "over": "Mais de",
+        "under": "Menos de",
+        "home": "Casa",
+        "away": "Fora",
+        "draw": "Empate",
+        "yes": "Sim",
+        "no": "Não",
     }
-    if market_name in _NBA_STATS:
-        stat = _NBA_STATS[market_name]
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} {stat}" if linha is not None else f"{direcao} {stat}"
 
-    _NBA_COMBO = {
-        "Points & Rebounds O/U":              "Pts+Reb",
-        "Points & Assists O/U":               "Pts+Ast",
-        "Assists & Rebounds O/U":             "Ast+Reb",
-        "Points, Assists & Rebounds O/U":     "Pts+Ast+Reb",
-        "Steals & Blocks O/U":                "Roubo+Bloq",
-    }
-    if market_name in _NBA_COMBO:
-        combo = _NBA_COMBO[market_name]
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} {combo}" if linha is not None else f"{direcao} {combo}"
+    lado_txt = side_map.get(
+        str(bet_side).lower(),
+        str(bet_side)
+    )
 
-    # ── NBA — Spread / Handicap ───────────────────────────────────────────
-    if market_name in {"Alternative Spread", "Spread Q1"}:
-        time = "Casa" if lado_l == "home" else "Fora"
-        periodo = " (1ºQ)" if "Q1" in market_name else ""
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap {time}{hdp}{periodo}"
+    # =====================================================
+    # NBA / NHL PROPS
+    # =====================================================
 
-    # ── NBA — Sim/Não ─────────────────────────────────────────────────────
-    if market_name in _MERCADOS_SIM_NAO:
-        return f"{market_name} — {'Sim' if lado_l == 'home' else 'Não'}"
+    if (
+        "points" in market_lower
+        and "milestones" not in market_lower
+    ):
+        desc = f"{lado_txt} {linha} pontos"
 
-    # ── NBA — Milestones ──────────────────────────────────────────────────
-    if market_name in _MERCADOS_MILESTONE:
-        stat_nome = market_name.replace("Player ", "").replace(" Milestones", "")
-        direcao = "Atinge" if lado_l == "home" else "Não atinge"
-        return f"{direcao} {linha} {stat_nome}" if linha is not None else f"{direcao} {stat_nome}"
+    elif "assists" in market_lower:
+        desc = f"{lado_txt} {linha} assistências"
 
-    # ── Player Props (NBA, NHL, etc.) ─────────────────────────────────────
-    if market_name.startswith("Player Props - "):
-        nome_limpo = _re.sub(r"\s*\(\d+\)\s*", " ", market_name).strip()
-        m = _re.match(r"Player Props - (.+?)\s*\((.+?)\)\s*$", nome_limpo)
-        if m:
-            jogador  = m.group(1).strip()
-            stat_en  = m.group(2).strip()
-            stat_pt  = _STAT_MAP.get(stat_en, stat_en)
-            direcao  = "Mais de" if lado_l == "home" else "Menos de"
-            sufixo   = f" {linha}" if linha is not None else ""
-            return f"{jogador} — {stat_pt}{sufixo} ({direcao})"
-        return f"{market_name} {lado}"
+    elif "rebounds" in market_lower:
+        desc = f"{lado_txt} {linha} rebotes"
 
-    # ── Tênis ─────────────────────────────────────────────────────────────
-    if market_name == "Spread (Games)":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap Games {time}{hdp}"
+    elif (
+        "3 point" in market_lower
+        or "threes" in market_lower
+    ):
+        desc = f"{lado_txt} {linha} bolas de 3"
 
-    if market_name == "Totals (Games)":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} games" if linha is not None else f"{direcao} games"
+    elif "pra" in market_lower:
+        desc = f"{lado_txt} {linha} PRA"
 
-    # ── Esports ───────────────────────────────────────────────────────────
-    if market_name == "Total Maps":
-        direcao = "Mais de" if lado_l == "home" else "Menos de"
-        return f"{direcao} {linha} mapas" if linha is not None else f"{direcao} mapas"
+    elif "double double" in market_lower:
+        desc = "Double Double"
 
-    if market_name == "Map Handicap":
-        time = "Casa" if lado_l == "home" else "Fora"
-        hdp = f" ({linha:+g})" if linha is not None else ""
-        return f"Handicap Mapas {time}{hdp}"
+    elif "triple double" in market_lower:
+        desc = "Triple Double"
 
-    # ── Fallback ──────────────────────────────────────────────────────────
-    lado_fmt = {"home": "Casa", "away": "Fora", "draw": "Empate"}.get(lado_l, lado)
-    return f"{market_name} — {lado_fmt}"
+    # =====================================================
+    # FUTEBOL
+    # =====================================================
 
+    elif "corners" in market_lower:
+        desc = f"{lado_txt} {linha} escanteios"
+
+    elif "bookings" in market_lower:
+        desc = f"{lado_txt} {linha} cartões"
+
+    elif "totals" in market_lower:
+        desc = f"{lado_txt} {linha} gols"
+
+    elif "spread" in market_lower:
+        desc = f"Handicap {linha}"
+
+    elif market_lower in ("ml", "moneyline"):
+        desc = lado_txt
+
+    # =====================================================
+    # PADRÃO
+    # =====================================================
+
+    else:
+        desc = market_name
+
+    # =====================================================
+    # PREFIXAR JOGADOR
+    # =====================================================
+
+    if jogador:
+        return f"{jogador} — {desc}"
+
+    return desc
 
 def _extrair_linha_label(market: dict, odds_info: list) -> tuple[Any, str | None]:
     """
@@ -450,31 +401,74 @@ def get_odds_multi(event_ids: list) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 3. Value Bets — EV calculado pela API (atualizado a cada 5s)
+# 3. Value Bets — EV calculado pela API
 # ---------------------------------------------------------------------------
 
-def get_value_bets(bookmaker: str = "Bet365") -> list[dict]:
+def get_value_bets(
+    bookmakers: list[str] | None = None
+) -> list[dict]:
     """
-    Value bets com expectedValue ja calculado pela API.
-    Mais confiavel que o Poisson fixo para ML e outros mercados.
+    Busca value bets diretamente da API.
+    Faz 1 request por bookmaker para evitar erro 400.
     """
-    url = (
-        f"{BASE_URL}/value-bets"
-        f"?apiKey={API_KEY}"
-        f"&bookmaker={bookmaker}"
-        f"&includeEventDetails=true"
-    )
-    try:
-        data = _get_json(url)
-        if not isinstance(data, list):
-            logger.warning("get_value_bets: resposta inesperada")
-            return []
-        logger.info("get_value_bets (%s): %d value bets", bookmaker, len(data))
-        return data
-    except requests.RequestException as exc:
-        logger.error("get_value_bets falhou: %s", exc)
-        return []
 
+    if bookmakers is None:
+        bookmakers = [
+            "Bet365",
+            "Betano BR"
+        ]
+
+    resultado = []
+
+    for bookmaker in bookmakers:
+
+        url = (
+            f"{BASE_URL}/value-bets"
+            f"?apiKey={API_KEY}"
+            f"&bookmaker={bookmaker}"
+            f"&includeEventDetails=true"
+        )
+
+        try:
+
+            data = _get_json(url)
+
+            if not isinstance(data, list):
+
+                logger.warning(
+                    "get_value_bets (%s): resposta inesperada",
+                    bookmaker
+                )
+
+                continue
+
+            logger.info(
+                "get_value_bets (%s): %d value bets",
+                bookmaker,
+                len(data)
+            )
+
+            resultado.extend(data)
+
+        except requests.RequestException as exc:
+
+            logger.error(
+                "get_value_bets (%s) falhou: %s",
+                bookmaker,
+                exc
+            )
+
+    logger.info(
+        "get_value_bets TOTAL: %d value bets",
+        len(resultado)
+    )
+
+    return resultado
+
+
+# ---------------------------------------------------------------------------
+# PROCESSAR VALUE BETS
+# ---------------------------------------------------------------------------
 
 def processar_value_bets(
     raw: list[dict],
@@ -483,48 +477,134 @@ def processar_value_bets(
     mercados_permitidos: set[str] | None,
     modo: str = "todos",
 ) -> list[dict]:
-    """
-    Converte payload /value-bets no formato padrao de oportunidade.
-    O EV vem do campo expectedValue da API — nao e estimativa manual.
-    modo: "futebol" | "nba" | "tenis" | "todos"
-    """
+
     resultado: dict[str, dict] = {}
 
     for vb in raw:
-        esporte_vb = vb.get("event", {}).get("sport", "").lower()
-        liga_vb    = vb.get("event", {}).get("league", "")
-        slug_vb    = liga_vb.lower().replace(" ", "-").replace(",", "")
 
-        # Filtro de esporte por modo — corrige o bug de tênis aparecendo no futebol
-        # e bloqueia esportes não suportados (Esports, Cricket, Volleyball etc.)
-        ESPORTES_SUPORTADOS = {"football", "basketball", "tennis"}
-        if esporte_vb not in ESPORTES_SUPORTADOS:
-            continue
-        if modo == "futebol" and esporte_vb != "football":
-            continue
-        if modo == "nba" and esporte_vb != "basketball":
-            continue
-        if modo == "tenis" and esporte_vb != "tennis":
+        # ---------------------------------------------------
+        # EVENTO
+        # ---------------------------------------------------
+
+        event_info = vb.get("event", {})
+
+        esporte_vb = (
+            event_info.get("sport")
+            or vb.get("sport")
+            or ""
+        ).strip().lower()
+
+        if "basket" in esporte_vb:
+            esporte_vb = "basketball"
+
+        elif "foot" in esporte_vb:
+            esporte_vb = "football"
+
+        elif "tennis" in esporte_vb:
+            esporte_vb = "tennis"
+
+        # ---------------------------------------------------
+        # FILTRO ESPORTE
+        # ---------------------------------------------------
+
+        if esporte_vb not in {
+            "football",
+            "basketball",
+            "tennis",
+        }:
             continue
 
-        market_name: str = vb.get("market", {}).get("name", "")
-        if mercados_permitidos and market_name not in mercados_permitidos:
-            continue
+        # ---------------------------------------------------
+        # MARKET ORIGINAL
+        # ---------------------------------------------------
+
+        market_name_original = (
+            vb.get("marketName")
+            or vb.get("market", {}).get("rawName")
+            or vb.get("market", {}).get("name", "")
+        ).strip()
+
+        market_lower = market_name_original.lower()
+
+        # ---------------------------------------------------
+        # NORMALIZAÇÃO
+        # ---------------------------------------------------
+
+        market_name = market_name_original
+
+        if (
+            "points" in market_lower
+            and "milestones" not in market_lower
+        ):
+            market_name = "Points O/U"
+
+        elif "rebounds" in market_lower:
+            market_name = "Rebounds O/U"
+
+        elif "assists" in market_lower:
+            market_name = "Assists O/U"
+
+        elif (
+            "3 point" in market_lower
+            or "threes" in market_lower
+        ):
+            market_name = "Player Threes Milestones"
+
+        elif "double double" in market_lower:
+            market_name = "Double Double"
+
+        elif "triple double" in market_lower:
+            market_name = "Triple Double"
+
+        logger.info(
+            "VB esporte=%s | mercado=%s",
+            esporte_vb,
+            market_name
+        )
+
+        # ---------------------------------------------------
+        # FILTRO NBA
+        # ---------------------------------------------------
+
+        if modo == "nba" and mercados_permitidos:
+        
+            mercado_ok = any(
+                m.lower() in market_name.lower()
+                for m in mercados_permitidos
+            )
+        
+            if not mercado_ok:
+                continue
+        
+        # ---------------------------------------------------
+        # EV
+        # ---------------------------------------------------
 
         ev_api = vb.get("expectedValue")
-        if ev_api is None or ev_api < EV_MINIMO:
+
+        if ev_api is None:
             continue
 
-        bookmaker: str = vb.get("bookmaker", "")
-        event_info = vb.get("event", {})
-        home: str = event_info.get("home", "?")
-        away: str = event_info.get("away", "?")
-        liga: str = event_info.get("league", "")
-        horario: str = _fmt_horario(event_info.get("date", ""))
+        try:
+            ev_api = float(ev_api)
+        except (TypeError, ValueError):
+            continue
 
-        bet_side: str = vb.get("betSide", "")
+        if ev_api < EV_MINIMO:
+            continue
+
+        # ---------------------------------------------------
+        # ODDS
+        # ---------------------------------------------------
+
+        bookmaker = vb.get("bookmaker", "")
+
+        bet_side = vb.get("betSide", "")
+
         bk_odds = vb.get("bookmakerOdds", {})
+
         odd_raw = bk_odds.get(bet_side)
+
         try:
             odd = float(odd_raw)
         except (TypeError, ValueError):
@@ -533,50 +613,151 @@ def processar_value_bets(
         if not (odd_min <= odd <= odd_max):
             continue
 
+        # ---------------------------------------------------
+        # DADOS EVENTO
+        # ---------------------------------------------------
+
+        home = event_info.get("home", "?")
+
+        away = event_info.get("away", "?")
+
+        liga = event_info.get("league", "")
+
+        horario = _fmt_horario(
+            event_info.get("date", "")
+        )
+
+        # ---------------------------------------------------
+        # LINHA
+        # ---------------------------------------------------
+
         linha = vb.get("market", {}).get("hdp")
-        tipo = _resolver_tipo(market_name, bet_side, linha, None)
-        prob_impl = round((1 / odd) * 100, 2) if odd > 0 else 50.0
 
-        # Deep link direto — corrige domínio para versão brasileira
+        # ---------------------------------------------------
+        # DESCRIÇÃO
+        # ---------------------------------------------------
+
+        tipo = _resolver_tipo(
+            market_name_original,
+            bet_side,
+            linha,
+            None
+        )
+
+        # ---------------------------------------------------
+        # PROBABILIDADE
+        # ---------------------------------------------------
+
+        prob_impl = (
+            round((1 / odd) * 100, 2)
+            if odd > 0 else 50.0
+        )
+
+        # ---------------------------------------------------
+        # LINKS
+        # ---------------------------------------------------
+
         def _fix_link(url: str) -> str:
-            return (url
-                .replace("https://www.bet365.com", "https://www.bet365.bet.br")
-                .replace("https://bet365.com",     "https://www.bet365.bet.br")
-                .replace("https://www.betano.com",  "https://www.betano.bet.br")
-                .replace("https://betano.com",      "https://www.betano.bet.br"))
-        link_vb = _fix_link(vb.get("bookmakerOdds", {}).get("href", ""))
 
-        chave = f"{home} x {away} | {tipo} | {bookmaker} | vb"
+            return (
+                url
+                .replace(
+                    "https://www.bet365.com",
+                    "https://www.bet365.bet.br"
+                )
+                .replace(
+                    "https://bet365.com",
+                    "https://www.bet365.bet.br"
+                )
+                .replace(
+                    "https://www.betano.com",
+                    "https://www.betano.bet.br"
+                )
+                .replace(
+                    "https://betano.com",
+                    "https://www.betano.bet.br"
+                )
+            )
+
+        link_vb = _fix_link(
+            bk_odds.get("href", "")
+        )
+
+        # ---------------------------------------------------
+        # CHAVE
+        # ---------------------------------------------------
+
+        chave = (
+            f"{home} x {away}"
+            f" | {tipo}"
+            f" | {bookmaker}"
+            f" | vb"
+        )
+
         resultado[chave] = {
-            "jogo": f"{home} x {away}",
-            "liga": liga,
-            "horario": horario,
-            "tipo": tipo,
-            "mercado": market_name,
-            "linha": linha,
-            "casa": bookmaker,
-            "odd": round(odd, 2),
-            "prob_modelo": prob_impl,
-            "ev": round(float(ev_api), 3),
-            "score": round((prob_impl / 100) * odd, 2),
-            "fonte": "value_bet_api",
-            "drop_sinal": False,
-            "link": link_vb,
+
+            "jogo":
+                f"{home} x {away}",
+
+            "liga":
+                liga,
+
+            "horario":
+                horario,
+
+            "tipo":
+                tipo,
+
+            "mercado":
+                market_name,
+
+            "linha":
+                linha,
+
+            "casa":
+                bookmaker,
+
+            "odd":
+                round(odd, 2),
+
+            "prob_modelo":
+                prob_impl,
+
+            "ev":
+                round(ev_api, 3),
+
+            "score":
+                round(
+                    (prob_impl / 100) * odd,
+                    2
+                ),
+
+            "fonte":
+                "value_bet_api",
+
+            "drop_sinal":
+                False,
+
+            "link":
+                link_vb,
         }
 
-    logger.info("processar_value_bets: %d oportunidades", len(resultado))
+    logger.info(
+        "processar_value_bets: %d oportunidades",
+        len(resultado)
+    )
+
     return list(resultado.values())
-
-
 # ---------------------------------------------------------------------------
 # 4. Arbitragem
 # ---------------------------------------------------------------------------
 
 def get_arbitrage(limit: int = 50) -> list[dict]:
     """
-    Oportunidades de arbitragem com stakes otimas ja calculadas pela API.
-    Retorna apenas arbs onde todos os legs usam os bookmakers configurados.
+    Oportunidades de arbitragem com stakes ótimas.
+    Retorna apenas arbs válidas da API.
     """
+
     url = (
         f"{BASE_URL}/arbitrage-bets"
         f"?apiKey={API_KEY}"
@@ -584,13 +765,44 @@ def get_arbitrage(limit: int = 50) -> list[dict]:
         f"&limit={limit}"
         f"&includeEventDetails=true"
     )
+
     try:
         data = _get_json(url)
+
+        # DEBUG
+        logger.info(f"ARB RAW TYPE: {type(data)}")
+
         if not isinstance(data, list):
             logger.warning("get_arbitrage: resposta inesperada")
+            logger.info(f"ARB RAW: {data}")
             return []
+
         logger.info("get_arbitrage: %d oportunidades", len(data))
+
+        # DEBUG detalhado
+        for arb in data[:5]:
+
+            event = arb.get("event", {})
+            market = arb.get("market", {})
+            legs = arb.get("legs", [])
+
+            logger.info(
+                f"ARB EVENTO="
+                f"{event.get('home', '?')} x {event.get('away', '?')} | "
+                f"mercado={market.get('name', '')} | "
+                f"legs={len(legs)} | "
+                f"profit={arb.get('profitMargin', 0)}%"
+            )
+
+            for leg in legs:
+                logger.info(
+                    f"  BOOK={leg.get('bookmaker')} | "
+                    f"odd={leg.get('odd')} | "
+                    f"side={leg.get('betSide')}"
+                )
+
         return data
+
     except requests.RequestException as exc:
         logger.error("get_arbitrage falhou: %s", exc)
         return []
@@ -599,35 +811,89 @@ def get_arbitrage(limit: int = 50) -> list[dict]:
 def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
     """
     Converte payload /arbitrage-bets em lista estruturada.
-    esporte: "futebol" | "nba" | "todos"
-    profitMargin = lucro garantido em % (ex: 2.3 = R$2.30 por R$100 apostados).
     """
+
     SLUGS_NBA = {"usa-nba"}
     SLUGS_FUT = {s for s, e in LIGA_ESPORTE.items() if e == "football"}
 
     resultado = []
-    for arb in raw:
-        event  = arb.get("event", {})
-        market = arb.get("market", {})
-        slug   = event.get("leagueSlug") or event.get("league_slug", "")
 
-        if esporte == "nba"     and slug not in SLUGS_NBA: continue
-        if esporte == "futebol" and slug not in SLUGS_FUT: continue
-        if esporte == "tenis"   and not any(slug.startswith(p) for p in SLUGS_TENIS_PREFIXOS): continue
+    logger.info(f"processar_arbitrage: recebidos {len(raw)} itens")
+
+    for arb in raw:
+
+        event = arb.get("event", {})
+        market = arb.get("market", {})
+        slug = event.get("leagueSlug") or event.get("league_slug", "")
+
+        # DEBUG
+        logger.info(
+            f"PROCESSANDO ARB | "
+            f"slug={slug} | "
+            f"liga={event.get('league')} | "
+            f"mercado={market.get('name')}"
+        )
+
+        # FILTROS
+        if esporte == "nba" and slug not in SLUGS_NBA:
+            continue
+
+        if esporte == "futebol" and slug not in SLUGS_FUT:
+            continue
+
+        if esporte == "tenis":
+            if not any(slug.startswith(p) for p in SLUGS_TENIS_PREFIXOS):
+                continue
+
+        legs = arb.get("legs", [])
+
+        # DEBUG bookmakers
+        logger.info(f"legs encontrados: {len(legs)}")
+
+        if len(legs) < 2:
+            logger.info("ARB IGNORADA: menos de 2 legs")
+            continue
 
         resultado.append({
             "id": arb.get("id", ""),
-            "jogo": f"{event.get('home', '?')} x {event.get('away', '?')}",
+
+            "jogo": (
+                f"{event.get('home', '?')} x "
+                f"{event.get('away', '?')}"
+            ),
+
             "liga": event.get("league", ""),
+
             "horario": _fmt_horario(event.get("date", "")),
+
             "mercado": market.get("name", ""),
-            "profit_pct": round(arb.get("profitMargin", 0.0), 2),
-            "implied_prob": round(arb.get("impliedProbability", 0.0), 4),
-            "legs": arb.get("legs", []),
-            "optimal_stakes": arb.get("optimalStakes", []),
+
+            "profit_pct": round(
+                arb.get("profitMargin", 0.0), 2
+            ),
+
+            "implied_prob": round(
+                arb.get("impliedProbability", 0.0), 4
+            ),
+
+            "legs": legs,
+
+            "optimal_stakes": arb.get(
+                "optimalStakes", []
+            ),
+
             "updated_at": arb.get("updatedAt", ""),
         })
-    resultado.sort(key=lambda x: x["profit_pct"], reverse=True)
+
+    resultado.sort(
+        key=lambda x: x["profit_pct"],
+        reverse=True
+    )
+
+    logger.info(
+        f"processar_arbitrage: {len(resultado)} oportunidades finais"
+    )
+
     return resultado
 
 
@@ -636,14 +902,11 @@ def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def get_dropping_odds(
-    sport: str = "football",
-    min_drop_pct: float = 5.0,
+    sport: str = "basketball",
+    min_drop_pct: float = 1.5,
     time_window: str = "opening",
 ) -> dict[int, dict]:
-    """
-    Retorna odds com queda significativa indexadas por eventId.
-    Queda >= min_drop_pct indica sharp money apostando contra essa odd.
-    """
+
     url = (
         f"{BASE_URL}/dropping-odds"
         f"?apiKey={API_KEY}"
@@ -653,20 +916,34 @@ def get_dropping_odds(
         f"&includeEventDetails=true"
         f"&limit=200"
     )
+
     try:
         data = _get_json(url)
+
+        logger.info("Dropping RAW TYPE: %s", type(data))
+
         if not isinstance(data, list):
             logger.warning("get_dropping_odds: resposta inesperada")
             return {}
 
-        index: dict[int, dict] = {}
+        logger.info("Dropping RAW itens: %d", len(data))
+
+        index = {}
+
         for item in data:
+
             eid = item.get("eventId")
             if not eid:
                 continue
-            drop_val = item.get("odds", {}).get("drop", {}).get(time_window) or 0.0
-            # Guardar a maior queda por evento
+
+            drop_val = (
+                item.get("odds", {})
+                    .get("drop", {})
+                    .get(time_window)
+            ) or 0.0
+
             if eid not in index or drop_val > index[eid].get("drop_pct", 0):
+
                 index[eid] = {
                     "drop_pct": drop_val,
                     "bet_side": item.get("betSide"),
@@ -675,21 +952,26 @@ def get_dropping_odds(
                     "market": item.get("market", {}).get("name"),
                 }
 
-        logger.info("get_dropping_odds: %d eventos com queda >= %.0f%%", len(index), min_drop_pct)
+        logger.info(
+            "get_dropping_odds: %d eventos com queda >= %.1f%%",
+            len(index),
+            min_drop_pct
+        )
+
         return index
+
     except requests.RequestException as exc:
-        # 403 = endpoint não incluído no plano — silencioso
+
         if "403" in str(exc):
-            logger.debug("get_dropping_odds: não disponível no plano atual (403)")
+            logger.debug("Dropping odds indisponível no plano")
         else:
             logger.error("get_dropping_odds falhou: %s", exc)
-        return {}
 
+        return {}
 
 # ---------------------------------------------------------------------------
 # 6. Motor principal
 # ---------------------------------------------------------------------------
-
 def rodar_sistema(
     odd_min: float,
     odd_max: float,
@@ -697,302 +979,511 @@ def rodar_sistema(
     stats_ligas: dict | None = None,
     modo: str = "todos",
 ) -> list[dict]:
-    """
-    Pipeline completo.
-    modo: "futebol" | "nba" | "tenis" | "todos"
-    stats_ligas: médias de gols — injetado pelo app (cache 24h).
-    Tênis usa SOMENTE value bets (odds/multi retorna 400 para tênis).
-    """
-    logger.info("=== SISTEMA INICIADO [modo=%s] ===", modo)
-    if mercados_permitidos:
-        logger.info("Mercados filtrados: %s", sorted(mercados_permitidos))
 
-    # Modo tênis: só value bets, sem pipeline Poisson
+    logger.info("=== SISTEMA INICIADO [modo=%s] ===", modo)
+
+    if mercados_permitidos:
+        logger.info(
+            "Mercados filtrados: %s",
+            sorted(mercados_permitidos)
+        )
+
+    # -------------------------------------------------------
+    # MODO TÊNIS
+    # -------------------------------------------------------
+
     if modo == "tenis":
-        vb_raw = get_value_bets("Bet365")
-        result = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos, modo="tenis")
-        result.sort(key=lambda x: x["ev"], reverse=True)
-        logger.info("Tênis: %d oportunidades (value bets only)", len(result))
+
+        vb_raw = get_value_bets(["Bet365", "Betano BR"]
+        )
+
+        result = processar_value_bets(
+            vb_raw,
+            odd_min,
+            odd_max,
+            mercados_permitidos,
+            modo="tenis"
+        )
+
+        result.sort(
+            key=lambda x: x["ev"],
+            reverse=True
+        )
+
+        logger.info(
+            "Tênis: %d oportunidades",
+            len(result)
+        )
+
         return result
 
-    janela_horas = JANELA_HORAS_NBA if modo == "nba" else JANELA_HORAS_FUTEBOL
+    # -------------------------------------------------------
+    # Janela de horas
+    # -------------------------------------------------------
 
-    # Stats históricas — injetadas pelo app (cache 24h em arquivo)
+    janela_horas = (
+        JANELA_HORAS_NBA
+        if modo == "nba"
+        else JANELA_HORAS_FUTEBOL
+    )
+
+    # -------------------------------------------------------
+    # Stats históricas
+    # -------------------------------------------------------
+
     if stats_ligas is None:
-        logger.warning("stats_ligas não fornecidas — buscando agora")
+
+        logger.warning(
+            "stats_ligas não fornecidas — buscando agora"
+        )
+
         stats_ligas = buscar_stats_ligas()
+
     if not stats_ligas:
-        logger.warning("stats_ligas vazias — usando padrão")
+
+        logger.warning(
+            "stats_ligas vazias — usando padrão"
+        )
+
         stats_ligas = {}
-    logger.info("Stats disponíveis para %d times", len(stats_ligas))
 
-    # A. Value bets (filtradas por modo após processar)
-    vb_raw = get_value_bets("Bet365")
-    oportunidades_vb_todos = processar_value_bets(vb_raw, odd_min, odd_max, mercados_permitidos, modo=modo)
+    logger.info(
+        "Stats disponíveis para %d times",
+        len(stats_ligas)
+    )
 
-    LIGAS_NBA_NOMES = {"USA - NBA", "NBA"}
-    LIGAS_FUT_NOMES = {l for l, e in LIGA_ESPORTE.items() if e == "football"}
+    # -------------------------------------------------------
+    # VALUE BETS
+    # -------------------------------------------------------
+
+    vb_raw = get_value_bets(["Bet365", "Betano BR"]
+    )
+
+    oportunidades_vb_todos = processar_value_bets(
+        vb_raw,
+        odd_min,
+        odd_max,
+        mercados_permitidos,
+        modo=modo
+    )
+
+    LIGAS_NBA_NOMES = {
+        "USA - NBA",
+        "NBA"
+    }
 
     if modo == "nba":
-        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") in LIGAS_NBA_NOMES]
+
+        oportunidades_vb = [
+            v for v in oportunidades_vb_todos
+            if v.get("liga", "") in LIGAS_NBA_NOMES
+        ]
+
     elif modo == "futebol":
-        oportunidades_vb = [v for v in oportunidades_vb_todos if v.get("liga","") not in LIGAS_NBA_NOMES]
+
+        oportunidades_vb = [
+            v for v in oportunidades_vb_todos
+            if v.get("liga", "") not in LIGAS_NBA_NOMES
+        ]
+
     else:
+
         oportunidades_vb = oportunidades_vb_todos
 
-    logger.info("Value bets [modo=%s]: %d", modo, len(oportunidades_vb))
+    logger.info(
+        "Value bets [modo=%s]: %d",
+        modo,
+        len(oportunidades_vb)
+    )
 
-    # B. Odds multi + Poisson
+    # -------------------------------------------------------
+    # EVENTOS
+    # -------------------------------------------------------
+
     eventos = get_events()
+
     agora = datetime.now(timezone.utc)
-    janela_fim = agora + timedelta(hours=janela_horas)
+
+    janela_fim = agora + timedelta(
+        hours=janela_horas
+    )
 
     eventos_filtrados = []
+
     for e in eventos:
+
         try:
-            dt = datetime.fromisoformat(e["date"].replace("Z", "+00:00"))
+
+            dt = datetime.fromisoformat(
+                e["date"].replace("Z", "+00:00")
+            )
+
             if agora <= dt <= janela_fim:
                 eventos_filtrados.append(e)
-        except Exception as exc:
-            logger.debug("Evento ignorado: %s", exc)
 
-    logger.info("Eventos nas proximas %dh: %d", janela_horas, len(eventos_filtrados))
+        except Exception as exc:
+
+            logger.debug(
+                "Evento ignorado: %s",
+                exc
+            )
+
+    logger.info(
+        "Eventos nas próximas %dh: %d",
+        janela_horas,
+        len(eventos_filtrados)
+    )
 
     eventos_ligas = [
+
         e for e in eventos_filtrados
-        if e.get("league", {}).get("slug") in LIGAS_PERMITIDAS
+
+        if e.get("league", {}).get("slug")
+        in LIGAS_PERMITIDAS
     ]
-    logger.info("Eventos em ligas fortes: %d", len(eventos_ligas))
 
-    # Filtrar por modo: só futebol, só NBA ou ambos
+    logger.info(
+        "Eventos em ligas fortes: %d",
+        len(eventos_ligas)
+    )
+
+    # -------------------------------------------------------
+    # FILTRO POR MODO
+    # -------------------------------------------------------
+
     if modo == "futebol":
+
         eventos_ord = sorted(
-            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "football"],
-            key=score_evento, reverse=True,
+
+            [
+                e for e in eventos_ligas
+                if LIGA_ESPORTE.get(
+                    e.get("league", {}).get("slug")
+                ) == "football"
+            ],
+
+            key=score_evento,
+            reverse=True
+
         )[:MAX_EVENTOS]
+
     elif modo == "nba":
+
         eventos_ord = sorted(
-            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "basketball"],
-            key=score_evento, reverse=True,
+
+            [
+                e for e in eventos_ligas
+                if LIGA_ESPORTE.get(
+                    e.get("league", {}).get("slug")
+                ) == "basketball"
+            ],
+
+            key=score_evento,
+            reverse=True
+
         )[:MAX_EVENTOS]
-        if not eventos_ord:
-            # Fallback: todos os eventos de basquete nas próximas 48h
-            eventos_ord = sorted(
-                [e for e in eventos_filtrados if e.get("sport","").lower() in ("basketball","basquete")],
-                key=score_evento, reverse=True,
-            )[:MAX_EVENTOS]
+
     else:
-        # Modo todos: cota dividida
-        ev_fut = sorted(
-            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "football"],
-            key=score_evento, reverse=True,
-        )[:MAX_EVENTOS - 10]
-        ev_bsk = sorted(
-            [e for e in eventos_ligas if LIGA_ESPORTE.get(e.get("league",{}).get("slug")) == "basketball"],
-            key=score_evento, reverse=True,
-        )[:10]
-        eventos_ord = ev_fut + ev_bsk or sorted(eventos_filtrados, key=score_evento, reverse=True)[:MAX_EVENTOS]
 
-    logger.info("Eventos selecionados [modo=%s]: %d", modo, len(eventos_ord))
+        eventos_ord = sorted(
+            eventos_ligas,
+            key=score_evento,
+            reverse=True
+        )[:MAX_EVENTOS]
 
-    event_ids = [e["id"] for e in eventos_ord]
-    logger.info("IDs enviados para odds: %d", len(event_ids))
+    logger.info(
+        "Eventos selecionados [modo=%s]: %d",
+        modo,
+        len(eventos_ord)
+    )
+
+    # -------------------------------------------------------
+    # ODDS
+    # -------------------------------------------------------
+
+    event_ids = [
+
+        e["id"]
+
+        for e in eventos_ord
+
+        if e.get("id")
+    ]
+
+    logger.info(
+        "IDs enviados para odds: %d",
+        len(event_ids)
+    )
 
     odds_lista = get_odds_multi(event_ids)
 
-    # C. Dropping odds — só futebol (basketball retorna 403 no plano atual)
-    drop_fut  = get_dropping_odds(sport="football", min_drop_pct=5.0)
-    dropping_index = {**drop_fut}
-    logger.info("Dropping odds: %d eventos", len(drop_fut))
+    # -------------------------------------------------------
+    # DROPPING ODDS
+    # -------------------------------------------------------
 
-    # D. Processar odds multi
+    drop_fut = get_dropping_odds(
+        sport="football",
+        min_drop_pct=5.0
+    )
+
+    dropping_index = {
+        **drop_fut
+    }
+
+    logger.info(
+        "Dropping odds: %d eventos",
+        len(drop_fut)
+    )
+
+    # -------------------------------------------------------
+    # RESULTADOS POISSON
+    # -------------------------------------------------------
+
     resultados_poisson: dict[str, dict] = {}
 
     for jogo in odds_lista:
-        bookmakers = jogo.get("bookmakers", {})
+
+        bookmakers = jogo.get(
+            "bookmakers",
+            {}
+        )
+
         if not bookmakers:
             continue
 
-        home: str = jogo.get("home", "?")
-        away: str = jogo.get("away", "?")
-        event_id: int = jogo.get("id", 0)
-        liga: str = jogo.get("league", {}).get("name", "")
-        horario: str = _fmt_horario(jogo.get("date", ""))
-        # Links diretos por casa: {"Bet365": "https://...", "Betano BR": "https://..."}
-        urls_jogo: dict = jogo.get("urls", {})
+        home = jogo.get("home", "?")
+        away = jogo.get("away", "?")
 
-        # Poisson com médias reais de gols via stats históricas.
-        # stats_ligas é injetado pelo motor após buscar_stats_ligas() (cache 24h).
-        lam_h, lam_a = get_medias_confronto(home, away, stats_ligas)
-        matriz = matriz_resultados(lam_h, lam_a)
-        p_home, p_draw, p_away = prob_vitoria(matriz)
-        probs = {"home": p_home, "draw": p_draw, "away": p_away}
+        event_id = jogo.get("id", 0)
 
-        drop_info = dropping_index.get(event_id)
+        liga = jogo.get(
+            "league",
+            {}
+        ).get("name", "")
 
-        skip_sem_odds = skip_formato = skip_faixa = skip_ev = aceitos = 0
+        horario = _fmt_horario(
+            jogo.get("date", "")
+        )
+
+        urls_jogo = jogo.get("urls", {})
+
+        # ---------------------------------------------------
+        # POISSON
+        # ---------------------------------------------------
+
+        lam_h, lam_a = get_medias_confronto(
+            home,
+            away,
+            stats_ligas
+        )
+
+        matriz = matriz_resultados(
+            lam_h,
+            lam_a
+        )
+
+        p_home, p_draw, p_away = prob_vitoria(
+            matriz
+        )
+
+        probs = {
+            "home": p_home,
+            "draw": p_draw,
+            "away": p_away
+        }
+
+        drop_info = dropping_index.get(
+            event_id
+        )
 
         for casa, markets in bookmakers.items():
+
             for market in markets:
-                market_name: str = market.get("name", "")
-                if mercados_permitidos and market_name not in mercados_permitidos:
+
+                market_name = market.get(
+                    "name",
+                    ""
+                )
+
+                if (
+                    mercados_permitidos
+                    and market_name not in mercados_permitidos
+                ):
                     continue
 
-                odds_info: list = market.get("odds", [])
+                odds_info = market.get(
+                    "odds",
+                    []
+                )
+
                 if not odds_info:
-                    skip_sem_odds += 1
                     continue
 
-                # Link direto para a casa
                 casa_base = casa.split(" ")[0]
-                raw_link  = urls_jogo.get(casa_base) or urls_jogo.get("Bet365", "")
-                link = (raw_link
-                    .replace("https://www.bet365.com", "https://www.bet365.bet.br")
-                    .replace("https://bet365.com",     "https://www.bet365.bet.br")
-                    .replace("https://www.betano.com",  "https://www.betano.bet.br")
-                    .replace("https://betano.com",      "https://www.betano.bet.br"))
 
-                drop_sinal = bool(drop_info and drop_info.get("market") == market_name)
+                raw_link = (
+                    urls_jogo.get(casa_base)
+                    or urls_jogo.get("Bet365", "")
+                )
 
-                # ── Mercados de props por jogador (over/under explícito) ───
-                if market_name in _MERCADOS_PROPS_POR_JOGADOR:
-                    for item in odds_info:
-                        if not isinstance(item, dict):
-                            continue
+                link = (
+                    raw_link
+                    .replace(
+                        "https://www.bet365.com",
+                        "https://www.bet365.bet.br"
+                    )
+                    .replace(
+                        "https://bet365.com",
+                        "https://www.bet365.bet.br"
+                    )
+                    .replace(
+                        "https://www.betano.com",
+                        "https://www.betano.bet.br"
+                    )
+                    .replace(
+                        "https://betano.com",
+                        "https://www.betano.bet.br"
+                    )
+                )
 
-                        raw_label = item.get("label", "")
-                        hdp_val   = item.get("hdp")
-                        over_val  = _safe_float(item.get("over"))
-                        under_val = _safe_float(item.get("under"))
+                drop_sinal = bool(
+                    drop_info
+                    and drop_info.get("market") == market_name
+                )
 
-                        # Limpar label: "Joel Embiid (1) (4.5)" → "Joel Embiid"
-                        import re as _re2
-                        nome = _re2.sub(r"\s*\(\d+\)\s*", " ", raw_label).strip()
-                        nome = _re2.sub(r"\s*\([\d.]+\)\s*$", "", nome).strip()
+                linha, label = _extrair_linha_label(
+                    market,
+                    odds_info
+                )
 
-                        for direcao, odd_val in [("over", over_val), ("under", under_val)]:
-                            if odd_val <= 1:
-                                continue
-                            if not (odd_min <= odd_val <= odd_max):
-                                skip_faixa += 1
-                                continue
-
-                            # Descrição clara: "Joel Embiid — Assists Mais de 4.5"
-                            stat_map = {
-                                "Points O/U": "Pontos", "Rebounds O/U": "Rebotes",
-                                "Assists O/U": "Assistências", "Steals O/U": "Roubos",
-                                "Blocks O/U": "Bloqueios", "Threes Made O/U": "Cestas 3pts",
-                                "Field Goals Made O/U": "Cestas",
-                                "Points & Rebounds O/U": "Pts+Reb",
-                                "Points & Assists O/U": "Pts+Ast",
-                                "Assists & Rebounds O/U": "Ast+Reb",
-                                "Points, Assists & Rebounds O/U": "Pts+Ast+Reb",
-                                "Steals & Blocks O/U": "Roubo+Bloq",
-                            }
-                            stat = stat_map.get(market_name, market_name)
-                            dir_pt = "Mais de" if direcao == "over" else "Menos de"
-                            linha_str = f" {hdp_val}" if hdp_val is not None else ""
-                            tipo = f"{nome} — {stat}{linha_str} ({dir_pt})"
-
-                            # EV: usa prob implícita da odd (mais preciso que Poisson para props)
-                            prob_impl = 1 / odd_val
-                            ev = round((prob_impl * odd_val) - 1)  # sempre ~0 pela margem da casa
-                            # Para props usamos a odd da casa oposta para estimar EV real
-                            odd_oposta = under_val if direcao == "over" else over_val
-                            if odd_oposta > 1:
-                                prob_fair = 1 / odd_oposta
-                                prob_real = 1 - prob_fair  # prob implícita sem margem
-                                ev = round((prob_real * odd_val) - 1)
-
-                            if ev < EV_MINIMO:
-                                skip_ev += 1
-                                continue
-
-                            aceitos += 1
-                            chave = f"{home} x {away} | {tipo} | {casa}"
-                            resultados_poisson[chave] = {
-                                "jogo":        f"{home} x {away}",
-                                "liga":        liga,
-                                "horario":     horario,
-                                "tipo":        tipo,
-                                "mercado":     market_name,
-                                "linha":       hdp_val,
-                                "casa":        casa,
-                                "odd":         round(odd_val, 2),
-                                "prob_modelo": round((1/odd_val) * 100, 2),
-                                "ev":          ev,
-                                "score":       round((1/odd_val) * odd_val, 2),
-                                "fonte":       "poisson",
-                                "drop_sinal":  drop_sinal,
-                                "link":        link,
-                            }
-                    continue  # próximo market
-
-                # ── Mercados padrão (home/away/draw) ─────────────────────
-                linha, label = _extrair_linha_label(market, odds_info)
-
-                if not isinstance(odds_info[0], dict):
-                    skip_formato += 1
-                    logger.debug("%s x %s | %s | odds[0] tipo: %s", home, away, market_name, type(odds_info[0]))
+                if not isinstance(
+                    odds_info[0],
+                    dict
+                ):
                     continue
 
                 for lado, odd_valor in odds_info[0].items():
-                    if lado in {"hdp", "label", "over", "under"}:
+
+                    if lado in {
+                        "hdp",
+                        "label",
+                        "over",
+                        "under"
+                    }:
                         continue
+
                     try:
                         odd = float(odd_valor)
-                    except (TypeError, ValueError):
+
+                    except (
+                        TypeError,
+                        ValueError
+                    ):
                         continue
 
-                    if not (odd_min <= odd <= odd_max):
-                        skip_faixa += 1
+                    if not (
+                        odd_min <= odd <= odd_max
+                    ):
                         continue
 
-                    tipo = _resolver_tipo(market_name, lado, linha, label)
-                    prob = _prob_para_lado(market_name, lado, probs)
-                    ev = round((prob * odd) - 1)
+                    tipo = _resolver_tipo(
+                        market_name,
+                        lado,
+                        linha,
+                        label
+                    )
+
+                    prob = _prob_para_lado(
+                        market_name,
+                        lado,
+                        probs
+                    )
+
+                    ev = round(
+                        (prob * odd) - 1,
+                        3
+                    )
 
                     if ev < EV_MINIMO:
-                        skip_ev += 1
                         continue
 
-                    aceitos += 1
-                    chave = f"{home} x {away} | {tipo} | {casa}"
+                    chave = (
+                        f"{home} x {away}"
+                        f" | {tipo}"
+                        f" | {casa}"
+                    )
+
                     resultados_poisson[chave] = {
-                        "jogo":        f"{home} x {away}",
-                        "liga":        liga,
-                        "horario":     horario,
-                        "tipo":        tipo,
-                        "mercado":     market_name,
-                        "linha":       linha,
-                        "casa":        casa,
-                        "odd":         round(odd, 2),
-                        "prob_modelo": round(prob * 100, 2),
-                        "ev":          ev,
-                        "score":       round(prob * odd, 2),
-                        "fonte":       "poisson",
-                        "drop_sinal":  drop_sinal,
-                        "link":        link,
+
+                        "jogo": f"{home} x {away}",
+                        "liga": liga,
+                        "horario": horario,
+                        "tipo": tipo,
+                        "mercado": market_name,
+                        "linha": linha,
+                        "casa": casa,
+                        "odd": round(odd, 2),
+
+                        "prob_modelo": round(
+                            prob * 100,
+                            2
+                        ),
+
+                        "ev": ev,
+
+                        "score": round(
+                            prob * odd,
+                            2
+                        ),
+
+                        "fonte": "poisson",
+
+                        "drop_sinal": drop_sinal,
+
+                        "link": link,
                     }
 
-        logger.debug("%s x %s | aceitos=%d sem_odds=%d fmt=%d faixa=%d ev=%d",
-                     home, away, aceitos, skip_sem_odds, skip_formato, skip_faixa, skip_ev)
+    # -------------------------------------------------------
+    # UNIFICAR
+    # -------------------------------------------------------
 
-    # E. Unificar: value bets tem prioridade sobre Poisson
-    chaves_vb = {v["jogo"] + v["tipo"] + v["casa"] for v in oportunidades_vb}
+    chaves_vb = {
+
+        v["jogo"] + v["tipo"] + v["casa"]
+
+        for v in oportunidades_vb
+    }
+
     poisson_extra = [
+
         p for p in resultados_poisson.values()
-        if (p["jogo"] + p["tipo"] + p["casa"]) not in chaves_vb
+
+        if (
+            p["jogo"]
+            + p["tipo"]
+            + p["casa"]
+        ) not in chaves_vb
     ]
 
-    todos = oportunidades_vb + poisson_extra
-    # Ordenar por horário (mais próximo primeiro) e dentro do mesmo horário por EV
-    todos.sort(key=lambda x: (x.get("horario", ""), -x["ev"]))
+    todos = (
+        oportunidades_vb
+        + poisson_extra
+    )
+
+    todos.sort(
+        key=lambda x: (
+            x.get("horario", ""),
+            -x["ev"]
+        )
+    )
 
     logger.info(
         "Oportunidades: %d value_bet_api + %d poisson = %d total",
-        len(oportunidades_vb), len(poisson_extra), len(todos),
+        len(oportunidades_vb),
+        len(poisson_extra),
+        len(todos),
     )
+
     return todos
 
 
@@ -1026,7 +1517,7 @@ def montar_multipla(resultados: list[dict], banca: float) -> dict:
         odd_total *= p["odd"]
         prob_total *= p["prob_modelo"] / 100
 
-    ev = round((prob_total * odd_total) - 1)
+    ev = round((prob_total * odd_total) - 1, 3)
 
     kelly = 0.0
     if odd_total > 1:
@@ -1087,8 +1578,8 @@ def buscar_comparacao_odds(
     ESPORTES_SET = {e.lower() for e in esportes}
 
     # Buscar value bets das duas casas
-    vb_b365   = get_value_bets("Bet365")
-    vb_betano = get_value_bets("Betano BR")
+    vb_b365   = get_value_bets(["Bet365"])
+    vb_betano = get_value_bets(["Betano BR"])
 
     # Indexar Betano por (eventId, market, lado) para lookup O(1)
     idx_betano: dict[tuple, dict] = {}
@@ -1192,8 +1683,26 @@ def buscar_comparacao_odds(
         )
 
         # Descrição clara: para ML mostra o lado específico da value bet
-        tipo_desc = _resolver_tipo(market_name, bet_side, linha, None)
-
+        jogador = (
+            vb.get("player")
+            or vb.get("market", {}).get("player")
+            or vb.get("market", {}).get("playerName")
+            or ""
+        )
+        
+        market_name_original = (
+            vb.get("marketName")
+            or vb.get("market", {}).get("rawName")
+            or vb.get("market", {}).get("name", "")
+        )
+        
+        tipo_desc = _resolver_tipo(
+            market_name_original,
+            bet_side,
+            linha,
+            jogador
+        )
+        
         resultado.append({
             "jogo":         f"{event_info.get('home','?')} x {event_info.get('away','?')}",
             "esporte":      event_info.get("sport", ""),
@@ -1226,6 +1735,7 @@ def buscar_comparacao_odds(
     logger.info("Comparação: %d linhas com margem <= %.1f%%", len(resultado), margem_max)
     return resultado
 
+
 # ---------------------------------------------------------------------------
 # Live — Detector de Crossing Odds (futebol ao vivo, Bet365)
 # ---------------------------------------------------------------------------
@@ -1234,8 +1744,9 @@ def buscar_comparacao_odds(
 # Útil como sinal de timing mesmo com só uma casa disponível.
 # ---------------------------------------------------------------------------
 
-ESPORTES_LIVE: list[str] = ["football"]  # só futebol tem odds ao vivo na API atual
-MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals"]
+ESPORTES_LIVE: list[str] = ["football", "basketball"]  # só futebol tem odds ao vivo na API atual
+MERCADOS_LIVE: list[str] = ["ML", "Spread", "Totals", "Points O/U","Rebounds O/U","Assists O/U","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"
+]
 MAX_EVENTOS_LIVE: int = 20
 
 
@@ -1325,7 +1836,7 @@ def buscar_crossing_odds(
 
         for casa_raw, markets in bookmakers.items():
             casa_base = casa_raw.split(" ")[0]
-            if casa_base not in ("Bet365", "Betano BR"):
+            if casa_base not in ("Bet365", "Betano"):
                 continue
 
             for market in markets:
