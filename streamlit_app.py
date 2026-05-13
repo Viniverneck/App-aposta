@@ -19,20 +19,6 @@ from stats_historicas import buscar_stats_ligas
 from telegram_alert import alertar_arbs, testar_conexao
 
 # ---------------------------------------------------------------------------
-# Mapeamento de nomes de casas — API usa "Betano", exibimos "Betano BR"
-# ---------------------------------------------------------------------------
-NOMES_CASAS = {
-    "Betano":   "Betano BR",
-    "Bet365":   "Bet365",
-}
-
-def _nome_casa(casa: str) -> str:
-    """Converte nome interno da API para nome de exibição."""
-    base = casa.split(" ")[0]  # remove sufixos como "(no latency)"
-    return NOMES_CASAS.get(base, casa)
-
-
-# ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
 
@@ -55,46 +41,6 @@ def _cached_rodar(modo: str, odd_min: float, odd_max: float,
 
 st.set_page_config(page_title="Trader PRO", page_icon="🚀", layout="wide")
 st.title("🚀 Trader PRO — Sistema Completo")
-
-# ---------------------------------------------------------------------------
-# CSS Responsivo — adapta layout para iPad e mobile
-# ---------------------------------------------------------------------------
-st.markdown("""
-<style>
-
-/* ── Mobile (até 768px) ── */
-@media (max-width: 768px) {
-
-    /* Ocultar sidebar por padrão */
-    [data-testid="stSidebar"] {
-        transform: translateX(-100%) !important;
-    }
-
-    [data-testid="stSidebar"][aria-expanded="true"] {
-        transform: translateX(0) !important;
-    }
-
-    /* Layout coluna única */
-    [data-testid="column"] {
-        width: 100% !important;
-        flex: 1 1 100% !important;
-    }
-
-    /* Radio vertical */
-    .stRadio > div {
-        flex-direction: column !important;
-        gap: 4px !important;
-    }
-
-    /* Tabelas */
-    [data-testid="stDataFrame"] iframe {
-        height: 500px !important;
-    }
-}
-
-</style>
-""", unsafe_allow_html=True)
-
 
 # Modo compacto — menos dados, mais leve para iPad
 COMPACTO = st.sidebar.toggle(
@@ -270,8 +216,8 @@ with st.sidebar:
     st.caption("Futebol ao vivo · Bet365")
     mkt_live = st.multiselect(
         "Mercados live",
-        ["ML", "Totals"],
-        default=["ML", "Totals"],
+        ["ML", "Totals", "Points O/U","Rebounds O/U","Assists O/U","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"],
+        default=["ML", "Totals", "Points O/U","Rebounds O/U","Assists O/U","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"],
         label_visibility="collapsed",
     )
     threshold_live = st.slider(
@@ -380,7 +326,7 @@ st.session_state["esp_comp_cache"]  = esp_comp if esp_comp else ["Football","Bas
 st.session_state["margem_max_cache"] = margem_max
 
 if buscar_comp:
-    with st.spinner("Comparando odds Bet365 x Betano BR..."): 
+    with st.spinner("Comparando odds Bet365 x Betano..."):
         st.session_state["comparacao"] = buscar_comparacao_odds(
             esportes=st.session_state["esp_comp_cache"],
             margem_max=margem_max,
@@ -397,7 +343,7 @@ if buscar_live:
     with st.spinner("Buscando crossing odds ao vivo..."):
         st.session_state["live_dados"] = buscar_crossing_odds(
             threshold=threshold_live,
-            mercados=mkt_live or ["ML","Totals"],
+            mercados=mkt_live or ["ML","Totals", "Points O/U","Rebounds O/U","Assists O/U","Player Points Milestones","Player Rebounds Milestones","Player Assists Milestones","Player Threes Milestones"],
         )
         st.session_state["live_ts"]       = time.time()
         st.session_state["mkt_live_cache"]      = mkt_live
@@ -465,7 +411,7 @@ def _exibir_links_picks(df: pd.DataFrame, key: str) -> None:
             jogo  = row.get("jogo", "")
             tipo  = row.get("tipo", "")
             odd   = row.get("odd", "")
-            casa  = _nome_casa(row.get("casa", "").split(" ")[0])
+            casa  = row.get("casa", "").split(" ")[0]  # remove sufixos como "(no latency)"
             fonte = row.get("fonte", "")
             icone = "🎯" if fonte == "value_bet_api" else "📌"
             label = f"{icone} **{jogo}** — {tipo} @ {odd:.2f} _{casa}_"
@@ -521,7 +467,7 @@ def _exibir_multipla(resultados: list[dict], banca: float, key_prefix: str) -> N
     st.markdown("**Picks (jogos distintos):**")
     for i, p in enumerate(multi["picks"], 1):
         link  = p.get("link", "")
-        casa  = _nome_casa(p.get("casa", "").split(" ")[0])
+        casa  = p.get("casa", "").split(" ")[0]
         link_md = f" → [Apostar na {casa}]({link})" if link else ""
         st.markdown(f"{i}. **{p['jogo']}** — {p['tipo']} @ {p['odd']:.2f} _(EV: {p['ev']:+.3f})_{link_md}")
 
@@ -573,7 +519,7 @@ def _exibir_arbitrage(arbs: list[dict], banca_sidebar: float, key_prefix: str) -
                 leg  = leg_map.get((bk, side), {})
                 link = leg.get("directLink") or leg.get("href","")
                 row  = st.columns([3,1,1,1])
-                row[0].markdown(f"**{_nome_casa(bk)}** — {side.upper()}" + (f"  [↗]({link})" if link else ""))
+                row[0].markdown(f"**{bk}** — {side.upper()}" + (f"  [↗]({link})" if link else ""))
                 row[1].markdown(f"`{leg.get('odds','?')}`")
                 row[2].markdown(f"R$ {s.get('stake',0):.2f}")
                 row[3].markdown(f"R$ {s.get('potentialReturn',0):.2f}")
@@ -637,7 +583,6 @@ def _render_futebol():
         else:
             df = (
                 pd.DataFrame(res)
-                .assign(casa=lambda x: x["casa"].apply(_nome_casa))
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
                 .reset_index(drop=True)
@@ -680,7 +625,6 @@ def _render_nba():
         else:
             df = (
                 pd.DataFrame(res)
-                .assign(casa=lambda x: x["casa"].apply(_nome_casa))
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
                 .reset_index(drop=True)
@@ -729,7 +673,6 @@ def _render_tenis():
         else:
             df = (
                 pd.DataFrame(res)
-                .assign(casa=lambda x: x["casa"].apply(_nome_casa))
                 .sort_values("ev", ascending=False)
                 .head(min(qtd_ref, 5) if COMPACTO else qtd_ref)
                 .reset_index(drop=True)
@@ -856,10 +799,8 @@ def _render_comparacao():
             "Mercado":    d["mercado"],
             "Tipo":       d["tipo"],
             "Bet365 VB":  d["odd_b365_vb"],
-            "🔗 Bet365":  d.get("link_b365", "") or "",
             "Bet365 Op":  d["odd_b365_op"],
             "Betano BR VB":  d["odd_betano_vb"] or "—",
-            "🔗 Betano BR":  d.get("link_betano", "") or "",
             "Betano BR Op":  d["odd_betano_op"] or "—",
             "Melhor VB":  d["melhor_vb"],
             "Melhor Op":  d["melhor_op"],
@@ -875,17 +816,17 @@ def _render_comparacao():
             if val < 102: return "color:#e67e22;font-weight:500"
         return ""
 
-    st.dataframe(
-        df,
-        column_config={
-            "Margem (%)": st.column_config.NumberColumn("Margem (%)", format="%.2f%%"),
-            "Melhor VB":  st.column_config.NumberColumn("Melhor VB",  format="%.3f"),
-            "Melhor Op":  st.column_config.NumberColumn("Melhor Op",  format="%.3f"),
-            "🔗 Bet365":  st.column_config.LinkColumn("🔗 Bet365",  display_text="Abrir"),
-            "🔗 Betano BR":  st.column_config.LinkColumn("🔗 Betano BR",  display_text="Abrir"),
-        },
-        width="stretch", hide_index=True,
+    styled = (
+        df.style
+        .map(_cor_margem, subset=["Margem (%)"])
+        .map(_cor_data,   subset=["Horário"])
+        .format({"Margem (%)": "{:.2f}%",
+                 "Melhor VB":  "{:.3f}",
+                 "Melhor Op":  "{:.3f}"})
     )
+    st.dataframe(styled, width="stretch", hide_index=True)
+    
+    
 
 # ---------------------------------------------------------------------------
 # MODO LIVE — Crossing Odds
@@ -959,7 +900,6 @@ def _render_live():
                 "Prob Casa":   f"{d['prob_home']}%",
                 "Prob Fora":   f"{d['prob_away']}%",
                 "Sinal":       d["apostar_em"],
-                "🔗 Aposta":   d.get("link", "") or "",
             })
 
         df = pd.DataFrame(rows)
@@ -975,16 +915,13 @@ def _render_live():
                 if val < 0.15: return "color:#e67e22"
             return ""
 
-        st.dataframe(
-            df,
-            column_config={
-                "Casa Odd":  st.column_config.NumberColumn("Casa Odd",  format="%.3f"),
-                "Fora Odd":  st.column_config.NumberColumn("Fora Odd",  format="%.3f"),
-                "Diferença": st.column_config.NumberColumn("Diferença", format="%.3f"),
-                "🔗 Aposta": st.column_config.LinkColumn("🔗 Aposta", display_text="Abrir"),
-            },
-            width="stretch", hide_index=True,
+        styled = (
+            df.style
+            .map(_cor_status_live, subset=["Status"])
+            .map(_cor_diff_live,   subset=["Diferença"])
+            .format({"Casa Odd": "{:.3f}", "Fora Odd": "{:.3f}", "Diferença": "{:.3f}"})
         )
+        st.dataframe(styled, width="stretch", hide_index=True)
         st.divider()
 
     # ── Calculadora Automática de Cruzamento ──────────────────────────────
