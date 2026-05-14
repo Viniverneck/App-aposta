@@ -13,14 +13,16 @@ from stats_historicas import buscar_stats_ligas, get_medias_confronto
 # Configuração
 # ---------------------------------------------------------------------------
 
-load_dotenv()
-
 # Compatibilidade local (.env) + Streamlit Cloud (st.secrets)
 try:
     import streamlit as st
     _st_key = st.secrets.get('API_KEY', '')
 except Exception:
     _st_key = ''
+    
+# Só carrega .env localmente
+if not _st_key:
+    load_dotenv()    
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,8 +35,8 @@ API_KEY: str = _st_key or os.getenv("API_KEY", "")
 BASE_URL: str = "https://api.odds-api.io/v3"
 BOOKMAKERS: str = "Bet365,Betano BR"
 
-MAX_EVENTOS: int = 30
-LOTE_ODDS: int = 10
+MAX_EVENTOS: int = 12
+LOTE_ODDS: int = 6
 EV_MINIMO: float = -0.20
 KELLY_MAX: float = 0.05
 JANELA_HORAS_FUTEBOL: int = 24
@@ -197,20 +199,51 @@ def _resolver_tipo(
     # DIREÇÃO DA APOSTA
     # =====================================================
 
-    side_map = {
-        "over": "Mais de",
-        "under": "Menos de",
-        "home": "Casa",
-        "away": "Fora",
-        "draw": "Empate",
-        "yes": "Sim",
-        "no": "Não",
-    }
-
-    lado_txt = side_map.get(
-        str(bet_side).lower(),
-        str(bet_side)
-    )
+    bet_side_lower = str(bet_side).lower()
+    
+    # =====================================================
+    # PLAYER PROPS NBA/NHL
+    # home = over
+    # away = under
+    # =====================================================
+    
+    if any(x in market_lower for x in [
+        "points",
+        "rebounds",
+        "assists",
+        "threes",
+        "3 point",
+        "pra",
+    ]):
+    
+        props_map = {
+            "home": "Mais de",
+            "away": "Menos de",
+            "over": "Mais de",
+            "under": "Menos de",
+        }
+    
+        lado_txt = props_map.get(
+            bet_side_lower,
+            bet_side
+        )
+    
+    else:
+    
+        side_map = {
+            "over": "Mais de",
+            "under": "Menos de",
+            "home": "Casa",
+            "away": "Fora",
+            "draw": "Empate",
+            "yes": "Sim",
+            "no": "Não",
+        }
+    
+        lado_txt = side_map.get(
+            bet_side_lower,
+            bet_side
+        )
 
     # =====================================================
     # NBA / NHL PROPS
@@ -222,7 +255,10 @@ def _resolver_tipo(
     ):
         desc = f"{lado_txt} {linha} pontos"
 
-    elif "assists" in market_lower:
+    elif (
+        "assists" in market_lower
+        and "team" not in market_lower
+    ):
         desc = f"{lado_txt} {linha} assistências"
 
     elif "rebounds" in market_lower:
@@ -326,7 +362,7 @@ def _prob_para_lado(market_name: str, lado: str, probs: dict) -> float:
 # ---------------------------------------------------------------------------
 # 1. Eventos
 # ---------------------------------------------------------------------------
-
+@st.cache_data(ttl=CACHE_TTL_EVENTOS)
 def get_events() -> list[dict]:
     """
     Retorna eventos pendentes de futebol e basquete combinados.
@@ -393,7 +429,8 @@ def get_odds_multi(event_ids: list) -> list[dict]:
         try:
             data = _get_json(url)
             if isinstance(data, list):
-                resultados.extend(data)
+                # Evita payload gigante
+                resultados.extend(data[:6])
         except requests.RequestException as exc:
             logger.error("get_odds_multi lote %d falhou: %s", i, exc)
     logger.info("get_odds_multi: %d jogos retornados", len(resultados))
@@ -403,7 +440,7 @@ def get_odds_multi(event_ids: list) -> list[dict]:
 # ---------------------------------------------------------------------------
 # 3. Value Bets — EV calculado pela API
 # ---------------------------------------------------------------------------
-
+@st.cache_data(ttl=CACHE_TTL_VALUE_BETS)
 def get_value_bets(
     bookmakers: list[str] | None = None
 ) -> list[dict]:
@@ -524,7 +561,7 @@ def processar_value_bets(
             or vb.get("market", {}).get("name", "")
         ).strip()
 
-        market_lower = market_name_original.lower()
+        market_lower = str(market_name_original).casefold()
 
         # ---------------------------------------------------
         # NORMALIZAÇÃO
@@ -747,7 +784,8 @@ def processar_value_bets(
         len(resultado)
     )
 
-    return list(resultado.values())
+    # Evita excesso de payload no mobile
+    return list(resultado.values())[:60]
 # ---------------------------------------------------------------------------
 # 4. Arbitragem
 # ---------------------------------------------------------------------------
@@ -894,13 +932,13 @@ def processar_arbitrage(raw: list[dict], esporte: str = "todos") -> list[dict]:
         f"processar_arbitrage: {len(resultado)} oportunidades finais"
     )
 
-    return resultado
+    return resultado[:30]
 
 
 # ---------------------------------------------------------------------------
 # 5. Dropping Odds — sinal de sharp money
 # ---------------------------------------------------------------------------
-
+@st.cache_data(ttl=CACHE_TTL_DROPPING)
 def get_dropping_odds(
     sport: str = "basketball",
     min_drop_pct: float = 1.5,
@@ -1247,6 +1285,9 @@ def rodar_sistema(
             "bookmakers",
             {}
         )
+        
+        if len(bookmakers) == 0:
+           continue
 
         if not bookmakers:
             continue
@@ -1297,6 +1338,10 @@ def rodar_sistema(
         )
 
         for casa, markets in bookmakers.items():
+            
+            # Evita processar casas desnecessárias
+            if casa not in ["Bet365", "Betano BR"]:
+                continue
 
             for market in markets:
 
@@ -1407,40 +1452,105 @@ def rodar_sistema(
                     if ev < EV_MINIMO:
                         continue
 
+                    # ---------------------------------------------
+                    # SCORE / EDGE
+                    # ---------------------------------------------
+
+                    prob_pct = round(
+                        prob * 100,
+                        2
+                    )
+
+                    # score simples
+                    score = round(
+                        prob * odd,
+                        3
+                    )
+
+                    # força do edge
+                    edge_score = round(
+                        score * (1 + ev),
+                        3
+                    )
+
+                    # ---------------------------------------------
+                    # QUALIDADE
+                    # ---------------------------------------------
+
+                    qualidade = "RUIM"
+
+                    if ev >= 0.10:
+                        qualidade = "🔥 EXCELENTE"
+
+                    elif ev >= 0.05:
+                        qualidade = "✅ BOA"
+
+                    elif ev > 0:
+                        qualidade = "⚡ VALOR"
+
+                    # ---------------------------------------------
+                    # CHAVE
+                    # ---------------------------------------------
+
                     chave = (
                         f"{home} x {away}"
                         f" | {tipo}"
                         f" | {casa}"
                     )
 
+                    # ---------------------------------------------
+                    # RESULTADO FINAL
+                    # ---------------------------------------------
+
                     resultados_poisson[chave] = {
 
-                        "jogo": f"{home} x {away}",
-                        "liga": liga,
-                        "horario": horario,
-                        "tipo": tipo,
-                        "mercado": market_name,
-                        "linha": linha,
-                        "casa": casa,
-                        "odd": round(odd, 2),
+                        "jogo":
+                            f"{home} x {away}",
 
-                        "prob_modelo": round(
-                            prob * 100,
-                            2
-                        ),
+                        "liga":
+                            liga,
 
-                        "ev": ev,
+                        "horario":
+                            horario,
 
-                        "score": round(
-                            prob * odd,
-                            2
-                        ),
+                        "tipo":
+                            tipo,
 
-                        "fonte": "poisson",
+                        "mercado":
+                            market_name,
 
-                        "drop_sinal": drop_sinal,
+                        "linha":
+                            linha,
 
-                        "link": link,
+                        "casa":
+                            casa,
+
+                        "odd":
+                            round(odd, 2),
+
+                        "prob_modelo":
+                            prob_pct,
+
+                        "ev":
+                            round(ev, 3),
+
+                        "score":
+                            score,
+
+                        "edge_score":
+                            edge_score,
+
+                        "qualidade":
+                            qualidade,
+
+                        "fonte":
+                            "poisson",
+
+                        "drop_sinal":
+                            drop_sinal,
+
+                        "link":
+                            link,
                     }
 
     # -------------------------------------------------------
@@ -1483,8 +1593,8 @@ def rodar_sistema(
         len(poisson_extra),
         len(todos),
     )
-
-    return todos
+    # Limita quantidade para não travar mobile/iPad
+    return todos[:80]
 
 
 # ---------------------------------------------------------------------------
@@ -1833,6 +1943,9 @@ def buscar_crossing_odds(
         )
 
         bookmakers = jogo.get("bookmakers", {})
+        
+        if len(bookmakers) == 0:
+           continue
 
         for casa_raw, markets in bookmakers.items():
             casa_base = casa_raw.split(" ")[0]
