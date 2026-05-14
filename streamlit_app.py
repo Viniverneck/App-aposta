@@ -422,7 +422,7 @@ def _tabela_ev_futebol(df: pd.DataFrame, key: str) -> None:
     RENAME = {
         "jogo":"Jogo","liga":"Liga","horario":"Horário","tipo":"Tipo",
         "mercado":"Mercado","linha":"Linha","casa":"Casa","odd":"Odd",
-        "prob_modelo":"Prob.(%)","ev":"EV","score":"Score","fonte":"Fonte",
+        "prob_modelo":"Prob.(%)","ev":"EV","edge_score": "Edge","qualidade": "Qualidade","fonte":"Fonte",
     }
     cols = [c for c in RENAME if c in df.columns]
     styled = (
@@ -440,7 +440,7 @@ def _tabela_ev_nba(df: pd.DataFrame, key: str) -> None:
     RENAME = {
         "jogo":"Jogo","horario":"Horário","mercado":"Mercado",
         "tipo":"Descrição","linha":"Linha","casa":"Casa",
-        "odd":"Odd","prob_modelo":"Prob.(%)","ev":"EV","fonte":"Fonte",
+        "odd":"Odd","prob_modelo":"Prob.(%)","ev":"EV","score": "Score","edge_score": "Edge","qualidade": "Qualidade","fonte":"Fonte",
     }
     cols = [c for c in RENAME if c in df.columns]
     styled = (
@@ -825,6 +825,163 @@ def _render_comparacao():
                  "Melhor Op":  "{:.3f}"})
     )
     st.dataframe(styled, width="stretch", hide_index=True)
+    
+    st.divider()
+
+    # ─────────────────────────────────────────────────────────────
+    # 🧮 Calculadora global de Stake — Painel Comparação
+    # ─────────────────────────────────────────────────────────────
+
+    st.markdown("### 🧮 Calculadora de Stake")
+
+    valor_base = st.number_input(
+        "💰 Valor total para dividir nas stakes",
+        min_value=10.0,
+        max_value=1_000_000.0,
+        value=float(st.session_state.get("valor_invest", 100.0)),
+        step=10.0,
+        key="stake_global_comp"
+    )
+
+    st.session_state["valor_invest"] = valor_base
+
+    st.caption(
+        "Calcula automaticamente as stakes para todas as oportunidades do painel."
+    )
+
+    for i, d in enumerate(dados):
+
+        try:
+            odd1 = float(d["melhor_vb"])
+            odd2 = float(d["melhor_op"])
+
+            if odd1 <= 1 or odd2 <= 1:
+                continue
+
+            soma_probs = (1 / odd1) + (1 / odd2)
+
+            retorno = valor_base / soma_probs
+
+            stake1 = retorno / odd1
+            stake2 = retorno / odd2
+
+            total = stake1 + stake2
+            lucro = retorno - total
+
+            eh_arb = soma_probs < 1
+
+            if eh_arb:
+                status = "🚨 ARB REAL"
+            elif d["margem_pct"] < 101:
+                status = "🔥 Muito Próximo"
+            else:
+                status = "📊 Monitorando"
+
+            with st.expander(
+                f"{status} | {d['jogo']} | {d['mercado']} | Margem {d['margem_pct']:.2f}%"
+            ):
+
+                c1, c2, c3, c4 = st.columns(4)
+
+                c1.metric(
+                    "Melhor VB",
+                    f"{odd1:.3f}",
+                    d.get("book_vb", "")
+                )
+
+                c2.metric(
+                    "Melhor OP",
+                    f"{odd2:.3f}",
+                    d.get("book_op", "")
+                )
+
+                c3.metric(
+                    "Margem",
+                    f"{d['margem_pct']:.2f}%"
+                )
+
+                c4.metric(
+                    "Lucro",
+                    f"R$ {lucro:.2f}"
+                )
+                # Nome das casas
+                casa_vb = d.get("book_vb", "VB")
+                casa_op = d.get("book_op", "OP")
+                
+                # Links
+                link_vb = d.get("link_vb", "")
+                link_op = d.get("link_op", "")
+                
+                # Texto clicável
+                casa_vb_txt = (
+                    f"[{casa_vb}]({link_vb})"
+                    if link_vb else casa_vb
+                )
+                
+                casa_op_txt = (
+                    f"[{casa_op}]({link_op})"
+                    if link_op else casa_op
+                )
+                
+                # -------------------------------------------------
+                # Casas e links
+                # -------------------------------------------------
+                
+                casa_vb = d.get("casa_vb") or d.get("book_vb") or "Bet365"
+                casa_op = d.get("casa_op") or d.get("book_op") or "Betano BR"
+                
+                link_vb = d.get("link_vb") or d.get("url_vb") or ""
+                link_op = d.get("link_op") or d.get("url_op") or ""
+                
+                # Nome clicável
+                if link_vb:
+                    casa_vb_md = f"[{casa_vb}]({link_vb})"
+                else:
+                    casa_vb_md = casa_vb
+                
+                if link_op:
+                    casa_op_md = f"[{casa_op}]({link_op})"
+                else:
+                    casa_op_md = casa_op
+                
+                # -------------------------------------------------
+                # Dataframe
+                # -------------------------------------------------
+                
+                stake_df = pd.DataFrame([
+                    {
+                        "Casa": casa_vb_md,
+                        "Odd": odd1,
+                        "Stake": round(stake1, 2),
+                        "Retorno": round(stake1 * odd1, 2),
+                    },
+                    {
+                        "Casa": casa_op_md,
+                        "Odd": odd2,
+                        "Stake": round(stake2, 2),
+                        "Retorno": round(stake2 * odd2, 2),
+                    },
+                ])
+
+
+                st.markdown(stake_df.to_html(
+                    escape=False,
+                    index=False
+                ), unsafe_allow_html=True)
+
+                if eh_arb:
+                    st.success(
+                        f"✅ Lucro garantido de R$ {lucro:.2f}"
+                    )
+                else:
+                    falta = round((soma_probs - 1) * 100, 2)
+
+                    st.warning(
+                        f"⚡ Ainda faltam {falta:.2f}% para virar arbitragem real."
+                    )
+
+        except Exception:
+            continue
     
     
 
