@@ -35,9 +35,9 @@ API_KEY: str = _st_key or os.getenv("API_KEY", "")
 BASE_URL: str = "https://api.odds-api.io/v3"
 BOOKMAKERS: str = "Bet365,Betano BR"
 
-MAX_EVENTOS: int = 12
-LOTE_ODDS: int = 6
-EV_MINIMO: float = -0.20
+MAX_EVENTOS: int = 30
+LOTE_ODDS: int = 10
+EV_MINIMO: float = 0.02
 KELLY_MAX: float = 0.05
 JANELA_HORAS_FUTEBOL: int = 24
 JANELA_HORAS_NBA:     int = 48  # NBA joga à noite no fuso BR
