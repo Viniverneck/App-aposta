@@ -233,8 +233,8 @@ def _resolver_tipo(
         side_map = {
             "over": "Mais de",
             "under": "Menos de",
-            "home": "Casa",
-            "away": "Fora",
+            "home": "Vitória Casa",
+            "away": "Vitória Fora",
             "draw": "Empate",
             "yes": "Sim",
             "no": "Não",
@@ -291,12 +291,38 @@ def _resolver_tipo(
 
     elif "totals" in market_lower:
         desc = f"{lado_txt} {linha} gols"
+        
+    elif (
+    "both teams to score" in market_lower
+    or "btts" in market_lower
+    ):
+    
+        desc = f"Ambos marcam — {lado_txt}"
 
     elif "spread" in market_lower:
-        desc = f"Handicap {linha}"
 
+        if bet_side_lower == "home":
+           desc = f"Casa {linha}"
+
+        elif bet_side_lower == "away":
+            desc = f"Fora {linha}"
+    
+        else:
+            desc = f"Handicap {linha}"
+    
     elif market_lower in ("ml", "moneyline"):
-        desc = lado_txt
+
+        if bet_side_lower == "home":
+            desc = "Vitória Casa"
+    
+        elif bet_side_lower == "away":
+            desc = "Vitória Fora"
+    
+        elif bet_side_lower == "draw":
+            desc = "Empate"
+    
+        else:
+            desc = lado_txt
 
     # =====================================================
     # PADRÃO
@@ -624,6 +650,8 @@ def processar_value_bets(
 
         try:
             ev_api = float(ev_api)
+            if ev_api > 1:
+                ev_api = ev_api / 100
         except (TypeError, ValueError):
             continue
 
@@ -689,6 +717,36 @@ def processar_value_bets(
             round((1 / odd) * 100, 2)
             if odd > 0 else 50.0
         )
+        # ---------------------------------------------------
+        # SCORE / EDGE
+        # ---------------------------------------------------
+        
+        prob_decimal = prob_impl / 100
+        
+        score = round(
+            prob_decimal * odd,
+            3
+        )
+        
+        edge_score = round(
+             ev_api * 1,
+             2
+        )
+        
+        # ---------------------------------------------------
+        # QUALIDADE
+        # ---------------------------------------------------
+        
+        qualidade = "RUIM"
+        
+        if ev_api >= 0.10:
+            qualidade = "🔥 EXCELENTE"
+        
+        elif ev_api >= 0.05:
+            qualidade = "✅ BOA"
+        
+        elif ev_api > 0:
+            qualidade = "⚡ VALOR"
 
         # ---------------------------------------------------
         # LINKS
@@ -764,10 +822,13 @@ def processar_value_bets(
                 round(ev_api, 3),
 
             "score":
-                round(
-                    (prob_impl / 100) * odd,
-                    2
-                ),
+                score,
+            
+            "edge_score":
+                edge_score,
+            
+            "qualidade":
+                qualidade,
 
             "fonte":
                 "value_bet_api",
