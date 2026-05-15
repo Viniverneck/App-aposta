@@ -930,8 +930,8 @@ def _render_comparacao():
                 casa_vb = d.get("casa_vb") or d.get("book_vb") or "Bet365"
                 casa_op = d.get("casa_op") or d.get("book_op") or "Betano BR"
                 
-                link_vb = d.get("link_vb") or d.get("url_vb") or ""
-                link_op = d.get("link_op") or d.get("url_op") or ""
+                link_vb = d.get("link_vb") or d.get("url_vb") or "Bet365"
+                link_op = d.get("link_op") or d.get("url_op") or "Betano BR"
                 
                 # Nome clicável
                 if link_vb:
